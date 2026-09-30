@@ -1266,7 +1266,6 @@ function BeautifulUI:CreateWindow(config)
         end
 
         function TabAPI:Graph(text, graphType, height)
-        function TabAPI:Graph(text, graphType, height)
             graphType = graphType or "Line"
             height = height or 160
             local frame = Create("Frame", {Size = UDim2.new(1, 0, 0, height + 40), BackgroundColor3 = Theme.Secondary, BorderSizePixel = 0, Parent = page})
