@@ -1265,348 +1265,827 @@ function BeautifulUI:CreateWindow(config)
             }
         end
 
-               function TabAPI:Graph(text, graphType, height)
-            graphType = graphType or "Line"
-            height = height or 160
-            local frame = Create("Frame", {Size = UDim2.new(1, 0, 0, height + 40), BackgroundColor3 = Theme.Secondary, BorderSizePixel = 0, Parent = page})
-            Corner(8, frame)
-            local st = Stroke(Theme.Accent, 1, 0.7, frame)
-            local titleLbl = Create("TextLabel", {Size = UDim2.new(1, -20, 0, 20), Position = UDim2.new(0, 12, 0, 6), BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = text, TextColor3 = Theme.Text, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, Parent = frame})
+function TabAPI:Graph(text, graphType, height)
+    local function normalizeGraphType(t)
+        t = tostring(t or "line"):lower():gsub("%s+", "")
 
-            local canvas = Create("Frame", {
-                Name = "GraphCanvas",
-                Size = UDim2.new(1, -24, 0, height),
-                Position = UDim2.new(0, 12, 0, 32),
-                BackgroundColor3 = Theme.Tertiary,
-                BorderSizePixel = 0,
-                ClipsDescendants = true,
-                Parent = frame
-            })
-            Corner(6, canvas)
+        local map = {
+            line = "line",
+            lines = "line",
+            linechart = "line",
+            polyline = "line",
 
-            local gridLines = {}
-            if graphType ~= "Pie" then
-                for i = 1, 4 do
-                    local gl = Create("Frame", {
-                        Size = UDim2.new(1, 0, 0, 1),
-                        Position = UDim2.new(0, 0, i/5, 0),
-                        BackgroundColor3 = Theme.Secondary,
-                        BackgroundTransparency = 0.5,
-                        BorderSizePixel = 0,
-                        Parent = canvas
-                    })
-                    table.insert(gridLines, gl)
+            area = "area",
+            areachart = "area",
+            fill = "area",
+
+            bar = "bar",
+            bars = "bar",
+            barchart = "bar",
+            column = "bar",
+            columns = "bar",
+
+            scatter = "scatter",
+            point = "scatter",
+            points = "scatter",
+
+            pie = "pie",
+            piechart = "pie",
+            doughnut = "pie",
+            donut = "pie",
+
+            radial = "radial",
+            radar = "radial",
+            spider = "radial",
+            polar = "radial",
+
+            stacked = "stacked",
+            stack = "stacked",
+            stackedarea = "stacked",
+        }
+
+        return map[t] or t
+    end
+
+    if typeof(height) == "UDim2" then
+        height = height.Offset
+    end
+
+    height = math.max(tonumber(height) or 160, 60)
+    graphType = normalizeGraphType(graphType)
+
+    local frame = Create("Frame", {
+        Size = UDim2.new(1, 0, 0, height + 40),
+        BackgroundColor3 = Theme.Secondary,
+        BorderSizePixel = 0,
+        Parent = page
+    })
+
+    Corner(8, frame)
+    local st = Stroke(Theme.Accent, 1, 0.7, frame)
+
+    local titleLbl = Create("TextLabel", {
+        Size = UDim2.new(1, -20, 0, 20),
+        Position = UDim2.new(0, 12, 0, 6),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBold,
+        Text = text or "Graph",
+        TextColor3 = Theme.Text,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = frame
+    })
+
+    local canvas = Create("Frame", {
+        Name = "GraphCanvas",
+        Size = UDim2.new(1, -24, 0, height),
+        Position = UDim2.new(0, 12, 0, 32),
+        BackgroundColor3 = Theme.Tertiary,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        ZIndex = 1,
+        Parent = frame
+    })
+
+    Corner(6, canvas)
+
+    local gridLines = {}
+    for i = 1, 4 do
+        local gl = Create("Frame", {
+            Size = UDim2.new(1, 0, 0, 1),
+            Position = UDim2.new(0, 0, i / 5, 0),
+            BackgroundColor3 = Theme.Secondary,
+            BackgroundTransparency = 0.5,
+            BorderSizePixel = 0,
+            ZIndex = 2,
+            Visible = (graphType ~= "pie" and graphType ~= "radial"),
+            Parent = canvas
+        })
+
+        table.insert(gridLines, gl)
+    end
+
+    local container = Create("Frame", {
+        Name = "GraphContainer",
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        ClipsDescendants = false,
+        ZIndex = 5,
+        Parent = canvas
+    })
+
+    local data = {}
+    local series = { data }
+
+    local minValue = 0
+    local maxValue = 100
+    local autoRange = false
+
+    local maxPoints = 50
+    local palette = {
+        Theme.Accent,
+        Theme.Success,
+        Theme.Warning,
+        Theme.Danger,
+        Theme.Info,
+        Color3.fromRGB(180, 100, 255),
+        Color3.fromRGB(255, 100, 180)
+    }
+
+    local needsRedraw = false
+    local autoRunning = false
+
+    local api = {}
+
+    -- Позволяет вызывать и graph:AddPoint(1), и graph.AddPoint(1)
+    local function normalizeCall(first, ...)
+        if first == api then
+            return ...
+        end
+        return first, ...
+    end
+
+    local function recalcAutoRange()
+        if not autoRange then return end
+
+        local mn, mx
+
+        for _, s in ipairs(series) do
+            if type(s) == "table" then
+                for _, v in ipairs(s) do
+                    v = tonumber(v)
+                    if v then
+                        if not mn or v < mn then mn = v end
+                        if not mx or v > mx then mx = v end
+                    end
                 end
             end
+        end
 
-            local container = Create("Frame", {
-                Name = "GraphContainer",
-                Size = UDim2.new(1, 0, 1, 0),
-                BackgroundTransparency = 1,
-                ClipsDescendants = false,
-                ZIndex = 5,
-                Parent = canvas
-            })
+        if mn then
+            minValue = mn
+            maxValue = mx
 
-            local data = {}
-            local series = {data}
-            local maxPoints = 50
-            local palette = {Theme.Accent, Theme.Success, Theme.Warning, Theme.Danger, Theme.Info, Color3.fromRGB(180,100,255), Color3.fromRGB(255,100,180)}
-            local needsRedraw = false
+            if maxValue == minValue then
+                maxValue = minValue + 1
+            end
+        end
+    end
 
-            local function clearContainer()
-                for _, c in ipairs(container:GetChildren()) do
-                    c:Destroy()
-                end
+    local function norm(v)
+        v = tonumber(v) or 0
+
+        if maxValue == minValue then
+            return 0.5
+        end
+
+        return math.clamp((v - minValue) / (maxValue - minValue), 0, 1)
+    end
+
+    local function clearContainer()
+        for _, c in ipairs(container:GetChildren()) do
+            c:Destroy()
+        end
+    end
+
+    local function drawSegment(x1, y1, x2, y2, color, zIndex, transparency, width)
+        local dx, dy = x2 - x1, y2 - y1
+        local len = math.sqrt(dx * dx + dy * dy)
+
+        if len < 0.5 then
+            return
+        end
+
+        local ang = math.deg(math.atan2(dy, dx))
+
+        local seg = Instance.new("Frame")
+        seg.Size = UDim2.new(0, len, 0, width or 2)
+        seg.Position = UDim2.new(0, x1, 0, y1)
+        seg.AnchorPoint = Vector2.new(0, 0.5)
+        seg.BackgroundColor3 = color or Theme.Accent
+        seg.BackgroundTransparency = transparency or 0
+        seg.BorderSizePixel = 0
+        seg.Rotation = ang
+        seg.ZIndex = zIndex or 10
+        seg.Parent = container
+    end
+
+    local function drawDot(x, y, size, color, zIndex)
+        size = math.max(tonumber(size) or 5, 2)
+
+        local dot = Instance.new("Frame")
+        dot.Size = UDim2.new(0, size, 0, size)
+        dot.Position = UDim2.new(0, x - size / 2, 0, y - size / 2)
+        dot.BackgroundColor3 = color or Theme.Accent
+        dot.BorderSizePixel = 0
+        dot.ZIndex = zIndex or 11
+        dot.Parent = container
+
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, math.floor(size / 2))
+        c.Parent = dot
+    end
+
+    local function drawLineSet(sData, color, showDots, transparency, lineWidth)
+        if type(sData) ~= "table" or #sData == 0 then
+            return
+        end
+
+        local w = canvas.AbsoluteSize.X
+        local h = canvas.AbsoluteSize.Y
+
+        if w < 20 or h < 20 then
+            return
+        end
+
+        local pad = 12
+        local usableW = w - pad * 2
+        local usableH = h - pad * 2
+
+        if usableW < 10 or usableH < 10 then
+            return
+        end
+
+        if #sData == 1 then
+            if showDots then
+                local x = pad + usableW / 2
+                local y = pad + usableH - norm(sData[1]) * usableH
+                drawDot(x, y, 5, color, 12)
+            end
+            return
+        end
+
+        for i = 1, #sData - 1 do
+            local x1 = pad + (i - 1) / math.max(#sData - 1, 1) * usableW
+            local x2 = pad + i / math.max(#sData - 1, 1) * usableW
+
+            local y1 = pad + usableH - norm(sData[i]) * usableH
+            local y2 = pad + usableH - norm(sData[i + 1]) * usableH
+
+            drawSegment(x1, y1, x2, y2, color, 10, transparency, lineWidth)
+        end
+
+        if showDots then
+            for i, v in ipairs(sData) do
+                local x = pad + (i - 1) / math.max(#sData - 1, 1) * usableW
+                local y = pad + usableH - norm(v) * usableH
+                drawDot(x, y, 5, color, 12)
+            end
+        end
+    end
+
+    local function redraw()
+        clearContainer()
+
+        if #series == 0 then
+            series = { data }
+        end
+
+        local w = canvas.AbsoluteSize.X
+        local h = canvas.AbsoluteSize.Y
+
+        if w < 20 or h < 20 then
+            return
+        end
+
+        local pad = 12
+        local usableW = w - pad * 2
+        local usableH = h - pad * 2
+
+        if usableW < 10 or usableH < 10 then
+            return
+        end
+
+        if graphType == "line" then
+            for i, s in ipairs(series) do
+                drawLineSet(s, palette[((i - 1) % #palette) + 1], true, 0, 2)
             end
 
-            local function drawSegment(x1, y1, x2, y2, color, zIndex, transparency)
-                local dx, dy = x2 - x1, y2 - y1
-                local len = math.sqrt(dx * dx + dy * dy)
-                if len < 0.5 then return end
-                local ang = math.deg(math.atan2(dy, dx))
-                local seg = Instance.new("Frame")
-                seg.Size = UDim2.new(0, len, 0, 2)
-                seg.Position = UDim2.new(0, x1, 0, y1)
-                seg.AnchorPoint = Vector2.new(0, 0.5)
-                seg.BackgroundColor3 = color
-                seg.BackgroundTransparency = transparency or 0
-                seg.BorderSizePixel = 0
-                seg.Rotation = ang
-                seg.ZIndex = zIndex or 10
-                seg.Parent = container
-            end
+        elseif graphType == "area" then
+            for si, s in ipairs(series) do
+                if type(s) == "table" and #s >= 2 then
+                    local color = palette[((si - 1) % #palette) + 1]
+                    local barW = math.max(usableW / math.max(#s - 1, 1), 2)
 
-            local function drawDot(x, y, size, color, zIndex)
-                local dot = Instance.new("Frame")
-                dot.Size = UDim2.new(0, size, 0, size)
-                dot.Position = UDim2.new(0, x - size/2, 0, y - size/2)
-                dot.BackgroundColor3 = color
-                dot.BorderSizePixel = 0
-                dot.ZIndex = zIndex or 11
-                dot.Parent = container
-                local c = Instance.new("UICorner")
-                c.CornerRadius = UDim.new(0, size/2)
-                c.Parent = dot
-            end
+                    for i = 1, #s - 1 do
+                        local x = pad + (i - 1) / math.max(#s - 1, 1) * usableW
 
-            local function redraw()
-                clearContainer()
-                if #data < 2 then return end
+                        local y1 = pad + usableH - norm(s[i]) * usableH
+                        local y2 = pad + usableH - norm(s[i + 1]) * usableH
 
-                local w = canvas.AbsoluteSize.X
-                local h = canvas.AbsoluteSize.Y
-                if w < 30 or h < 30 then return end
-
-                local pad = 12
-                local usableW = w - pad * 2
-                local usableH = h - pad * 2
-
-                if graphType == "Line" then
-                    for i = 1, #data - 1 do
-                        local x1 = pad + (i - 1) / math.max(#data - 1, 1) * usableW
-                        local x2 = pad + i / math.max(#data - 1, 1) * usableW
-                        local y1 = pad + usableH - (data[i] / 100) * usableH
-                        local y2 = pad + usableH - (data[i + 1] / 100) * usableH
-                        drawSegment(x1, y1, x2, y2, Theme.Accent, 10)
-                    end
-                    for i, v in ipairs(data) do
-                        local x = pad + (i - 1) / math.max(#data - 1, 1) * usableW
-                        local y = pad + usableH - (v / 100) * usableH
-                        drawDot(x, y, 5, Theme.Accent, 11)
-                    end
-
-                elseif graphType == "Area" then
-                    local barW = math.max(usableW / math.max(#data - 1, 1), 2)
-                    for i = 1, #data - 1 do
-                        local x = pad + (i - 1) / math.max(#data - 1, 1) * usableW
-                        local y1 = pad + usableH - (data[i] / 100) * usableH
-                        local y2 = pad + usableH - (data[i + 1] / 100) * usableH
                         local minY = math.min(y1, y2)
                         local fillH = (pad + usableH) - minY
+
                         local f = Instance.new("Frame")
                         f.Size = UDim2.new(0, barW + 1, 0, fillH)
                         f.Position = UDim2.new(0, x, 0, minY)
-                        f.BackgroundColor3 = Theme.Accent
-                        f.BackgroundTransparency = 0.55
+                        f.BackgroundColor3 = color
+                        f.BackgroundTransparency = math.clamp(0.55 + (si - 1) * 0.05, 0, 0.9)
                         f.BorderSizePixel = 0
                         f.ZIndex = 8
                         f.Parent = container
                     end
-                    for i = 1, #data - 1 do
-                        local x1 = pad + (i - 1) / math.max(#data - 1, 1) * usableW
-                        local x2 = pad + i / math.max(#data - 1, 1) * usableW
-                        local y1 = pad + usableH - (data[i] / 100) * usableH
-                        local y2 = pad + usableH - (data[i + 1] / 100) * usableH
-                        drawSegment(x1, y1, x2, y2, Theme.Accent, 10)
-                    end
 
-                elseif graphType == "Bar" then
-                    local gap = 3
-                    local barW = math.max((w - pad * 2 - gap * (#data - 1)) / #data, 3)
-                    for i, v in ipairs(data) do
-                        local x = pad + (i - 1) * (barW + gap)
-                        local barH = (v / 100) * (h - pad * 2)
-                        local bar = Instance.new("Frame")
-                        bar.Size = UDim2.new(0, barW, 0, barH)
-                        bar.Position = UDim2.new(0, x, 1, -pad - barH)
-                        bar.BackgroundColor3 = Theme.Accent
-                        bar.BorderSizePixel = 0
-                        bar.ZIndex = 10
-                        bar.Parent = container
-                        local c = Instance.new("UICorner")
-                        c.CornerRadius = UDim.new(0, 3)
-                        c.Parent = bar
-                    end
+                    drawLineSet(s, color, false, 0, 2)
+                end
+            end
 
-                elseif graphType == "Scatter" then
-                    for i, v in ipairs(data) do
-                        local x = pad + (i - 1) / math.max(#data - 1, 1) * usableW
-                        local y = pad + usableH - (v / 100) * usableH
-                        drawDot(x, y, 8, palette[(i - 1) % #palette + 1], 11)
-                    end
+        elseif graphType == "bar" then
+            local sData = series[1] or data
+            local n = #sData
 
-                elseif graphType == "Pie" then
-                    local total = 0
-                    for _, v in ipairs(data) do total = total + v end
-                    if total > 0 then
-                        local size = math.min(w, h) - 24
-                        local cx, cy = w / 2, h / 2
-                        local radius = size / 2
-                        local startAngle = -90
-                        for i, v in ipairs(data) do
-                            local sweep = (v / total) * 360
-                            local steps = math.max(math.ceil(sweep / 3), 3)
-                            local color = palette[(i - 1) % #palette + 1]
-                            for s = 0, steps - 1 do
-                                local a1 = startAngle + (s / steps) * sweep
-                                local a2 = startAngle + ((s + 1) / steps) * sweep
-                                local midA = (a1 + a2) / 2
-                                local rad = math.rad(midA)
-                                local wx = cx + math.cos(rad) * radius / 2
-                                local wy = cy + math.sin(rad) * radius / 2
-                                local wedge = Instance.new("Frame")
-                                wedge.Size = UDim2.new(0, radius, 0, math.max(sweep / steps * 3, 5))
-                                wedge.Position = UDim2.new(0, wx - radius / 2, 0, wy - 2.5)
-                                wedge.AnchorPoint = Vector2.new(0, 0.5)
-                                wedge.BackgroundColor3 = color
-                                wedge.BorderSizePixel = 0
-                                wedge.Rotation = midA
-                                wedge.ZIndex = 10
-                                wedge.Parent = container
-                            end
-                            startAngle = startAngle + sweep
+            if n == 0 then
+                return
+            end
+
+            local gap = math.max(2, math.floor(usableW * 0.02))
+            local barW = math.max((usableW - gap * math.max(n - 1, 0)) / n, 3)
+
+            for i, v in ipairs(sData) do
+                local x = pad + (i - 1) * (barW + gap)
+                local barH = norm(v) * usableH
+
+                local bar = Instance.new("Frame")
+                bar.Size = UDim2.new(0, barW, 0, barH)
+                bar.Position = UDim2.new(0, x, 1, -pad - barH)
+                bar.BackgroundColor3 = palette[((i - 1) % #palette) + 1]
+                bar.BorderSizePixel = 0
+                bar.ZIndex = 10
+                bar.Parent = container
+
+                local c = Instance.new("UICorner")
+                c.CornerRadius = UDim.new(0, math.min(3, barW / 2))
+                c.Parent = bar
+            end
+
+        elseif graphType == "scatter" then
+            for si, s in ipairs(series) do
+                if type(s) == "table" then
+                    local color = palette[((si - 1) % #palette) + 1]
+                    local n = #s
+
+                    for i, v in ipairs(s) do
+                        local x
+
+                        if n == 1 then
+                            x = pad + usableW / 2
+                        else
+                            x = pad + (i - 1) / (n - 1) * usableW
                         end
-                        local inner = Instance.new("Frame")
-                        inner.Size = UDim2.new(0, radius, 0, radius)
-                        inner.Position = UDim2.new(0.5, -radius/2, 0.5, -radius/2)
-                        inner.BackgroundColor3 = Theme.Tertiary
-                        inner.BorderSizePixel = 0
-                        inner.ZIndex = 15
-                        inner.Parent = container
-                        local ic = Instance.new("UICorner")
-                        ic.CornerRadius = UDim.new(0, radius/2)
-                        ic.Parent = inner
-                    end
 
-                elseif graphType == "Radial" then
-                    local cx, cy = w / 2, h / 2
-                    local maxR = math.min(cx, cy) - 12
-                    local n = #data
-                    local angleStep = 360 / n
-                    for i = 1, n do
-                        local spoke = Instance.new("Frame")
-                        spoke.Size = UDim2.new(0, maxR, 0, 1)
-                        spoke.Position = UDim2.new(0, cx, 0, cy)
-                        spoke.AnchorPoint = Vector2.new(0, 0.5)
-                        spoke.BackgroundColor3 = Theme.Tertiary
-                        spoke.BorderSizePixel = 0
-                        spoke.Rotation = (i - 1) * angleStep - 90
-                        spoke.ZIndex = 5
-                        spoke.Parent = container
-                    end
-                    for i, v in ipairs(data) do
-                        local ang = math.rad((i - 1) * angleStep - 90)
-                        local r = (v / 100) * maxR
-                        local x = cx + math.cos(ang) * r
-                        local y = cy + math.sin(ang) * r
-                        drawDot(x, y, 8, Theme.Accent, 11)
-                    end
-                    for i = 1, n do
-                        local j = (i % n) + 1
-                        local ang1 = math.rad((i - 1) * angleStep - 90)
-                        local ang2 = math.rad((j - 1) * angleStep - 90)
-                        local r1 = (data[i] / 100) * maxR
-                        local r2 = (data[j] / 100) * maxR
-                        local x1 = cx + math.cos(ang1) * r1
-                        local y1 = cy + math.sin(ang1) * r1
-                        local x2 = cx + math.cos(ang2) * r2
-                        local y2 = cy + math.sin(ang2) * r2
-                        drawSegment(x1, y1, x2, y2, Theme.Accent, 10)
-                    end
-
-                elseif graphType == "Stacked" then
-                    for sIdx, sData in ipairs(series) do
-                        if #sData >= 2 then
-                            local color = palette[((sIdx - 1) % #palette) + 1]
-                            for i = 1, #sData - 1 do
-                                local x1 = pad + (i - 1) / math.max(#sData - 1, 1) * usableW
-                                local x2 = pad + i / math.max(#sData - 1, 1) * usableW
-                                local y1 = pad + usableH - (sData[i] / 100) * usableH
-                                local y2 = pad + usableH - (sData[i + 1] / 100) * usableH
-                                drawSegment(x1, y1, x2, y2, color, 10 + sIdx, sIdx == 1 and 0 or 0.2)
-                            end
-                        end
+                        local y = pad + usableH - norm(v) * usableH
+                        drawDot(x, y, 8, color, 12)
                     end
                 end
             end
 
-            -- 🎯 Умная отрисовка: ждёт размер через Heartbeat, но не спамит
-            local function requestRedraw()
-                needsRedraw = true
+        elseif graphType == "pie" then
+            local sData = series[1] or data
+            local total = 0
+
+            for _, v in ipairs(sData) do
+                total = total + math.max(tonumber(v) or 0, 0)
             end
 
-            -- Единый Heartbeat-loop для перерисовки при необходимости
-            local renderConn
-            renderConn = RunService.Heartbeat:Connect(function()
-                if not frame.Parent then
-                    if renderConn then renderConn:Disconnect() end
-                    return
-                end
-                if needsRedraw then
-                    local w = canvas.AbsoluteSize.X
-                    if w >= 30 then
-                        needsRedraw = false
-                        redraw()
+            if total <= 0 then
+                return
+            end
+
+            local size = math.min(w, h) - 24
+            if size < 10 then
+                return
+            end
+
+            local cx, cy = w / 2, h / 2
+            local radius = size / 2
+            local startAngle = -90
+
+            for i, v in ipairs(sData) do
+                v = math.max(tonumber(v) or 0, 0)
+
+                if v > 0 then
+                    local sweep = (v / total) * 360
+                    local steps = math.max(math.ceil(sweep / 4), 4)
+                    local color = palette[((i - 1) % #palette) + 1]
+
+                    for s = 0, steps - 1 do
+                        local a1 = startAngle + (s / steps) * sweep
+                        local a2 = startAngle + ((s + 1) / steps) * sweep
+                        local midA = (a1 + a2) / 2
+                        local rad = math.rad(midA)
+
+                        local wx = cx + math.cos(rad) * radius / 2
+                        local wy = cy + math.sin(rad) * radius / 2
+
+                        local wedge = Instance.new("Frame")
+                        wedge.Size = UDim2.new(0, radius, 0, math.max((sweep / steps) * 3, 6))
+                        wedge.Position = UDim2.new(0, wx - radius / 2, 0, wy - 3)
+                        wedge.AnchorPoint = Vector2.new(0, 0.5)
+                        wedge.BackgroundColor3 = color
+                        wedge.BorderSizePixel = 0
+                        wedge.Rotation = midA
+                        wedge.ZIndex = 10
+                        wedge.Parent = container
                     end
                 end
-            end)
 
-            canvas:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-                if canvas.AbsoluteSize.X >= 30 then
-                    requestRedraw()
-                end
-            end)
+                startAngle = startAngle + sweep
+            end
 
-            registerThemeElement(frame, function()
-                frame.BackgroundColor3 = Theme.Secondary
-                st.Color = Theme.Accent
-                titleLbl.TextColor3 = Theme.Text
-                canvas.BackgroundColor3 = Theme.Tertiary
-                for _, gl in ipairs(gridLines) do
-                    gl.BackgroundColor3 = Theme.Secondary
-                end
-                palette = {Theme.Accent, Theme.Success, Theme.Warning, Theme.Danger, Theme.Info, Color3.fromRGB(180,100,255), Color3.fromRGB(255,100,180)}
-                requestRedraw()
-            end)
+            local inner = Instance.new("Frame")
+            inner.Size = UDim2.new(0, radius, 0, radius)
+            inner.Position = UDim2.new(0.5, -radius / 2, 0.5, -radius / 2)
+            inner.BackgroundColor3 = Theme.Tertiary
+            inner.BorderSizePixel = 0
+            inner.ZIndex = 15
+            inner.Parent = container
 
-            return {
-                AddPoint = function(v)
-                    table.insert(data, math.clamp(v, 0, 100))
-                    if #data > maxPoints then table.remove(data, 1) end
-                    requestRedraw()
-                end,
-                SetData = function(arr)
-                    data = {}
-                    for _, v in ipairs(arr) do table.insert(data, math.clamp(v, 0, 100)) end
-                    series = {data}
-                    requestRedraw()
-                end,
-                GetData = function() return data end,
-                Clear = function()
-                    data = {}
-                    series = {data}
-                    clearContainer()
-                end,
-                AddSeries = function(arr)
-                    local ns = {}
-                    for _, v in ipairs(arr) do table.insert(ns, math.clamp(v, 0, 100)) end
-                    table.insert(series, ns)
-                    if graphType == "Stacked" then requestRedraw() end
-                end,
-                ClearSeries = function()
-                    series = {data}
-                    if graphType == "Stacked" then requestRedraw() end
-                end,
-                AutoUpdate = function(interval, mn, mx)
-                    mn, mx = mn or 0, mx or 100
-                    task.spawn(function()
-                        while canvas.Parent do
-                            table.insert(data, math.random(mn, mx))
-                            if #data > maxPoints then table.remove(data, 1) end
-                            requestRedraw()
-                            task.wait(interval or 1)
-                        end
-                    end)
-                end,
-                AnimateColor = function(c1, c2, duration)
-                    return BeautifulUI.AnimatedColor(canvas, "BackgroundColor3", c1, c2, duration)
-                end,
-                AnimateGradient = function(colors, speed)
-                    return BeautifulUI.AnimatedGradient(canvas, colors, speed)
+            local ic = Instance.new("UICorner")
+            ic.CornerRadius = UDim.new(0, radius / 2)
+            ic.Parent = inner
+
+        elseif graphType == "radial" then
+            local sData = series[1] or data
+            local n = #sData
+
+            if n == 0 then
+                return
+            end
+
+            local cx, cy = w / 2, h / 2
+            local maxR = math.min(cx, cy) - 12
+
+            if maxR < 5 then
+                return
+            end
+
+            if n >= 3 then
+                local angleStep = 360 / n
+
+                for i = 1, n do
+                    local spoke = Instance.new("Frame")
+                    spoke.Size = UDim2.new(0, maxR, 0, 1)
+                    spoke.Position = UDim2.new(0, cx, 0, cy)
+                    spoke.AnchorPoint = Vector2.new(0, 0.5)
+                    spoke.BackgroundColor3 = Theme.SubText
+                    spoke.BackgroundTransparency = 0.5
+                    spoke.BorderSizePixel = 0
+                    spoke.Rotation = (i - 1) * angleStep - 90
+                    spoke.ZIndex = 5
+                    spoke.Parent = container
                 end
-            }
+
+                local points = {}
+
+                for i, v in ipairs(sData) do
+                    local ang = math.rad((i - 1) * angleStep - 90)
+                    local r = norm(v) * maxR
+
+                    points[i] = {
+                        x = cx + math.cos(ang) * r,
+                        y = cy + math.sin(ang) * r
+                    }
+                end
+
+                for i = 1, n do
+                    local j = (i % n) + 1
+                    drawSegment(points[i].x, points[i].y, points[j].x, points[j].y, Theme.Accent, 10, 0, 2)
+                end
+
+                for _, p in ipairs(points) do
+                    drawDot(p.x, p.y, 7, Theme.Accent, 12)
+                end
+            else
+                for i, v in ipairs(sData) do
+                    local ang = math.rad(-90 + (i - 1) * (360 / math.max(n, 1)))
+                    local r = norm(v) * maxR
+
+                    drawDot(
+                        cx + math.cos(ang) * r,
+                        cy + math.sin(ang) * r,
+                        8,
+                        Theme.Accent,
+                        12
+                    )
+                end
+            end
+
+        elseif graphType == "stacked" then
+            for si, s in ipairs(series) do
+                if type(s) == "table" and #s >= 2 then
+                    local color = palette[((si - 1) % #palette) + 1]
+                    drawLineSet(s, color, false, si == 1 and 0 or 0.15, 2)
+                end
+            end
+
+        else
+            -- Неизвестный тип: fallback на line
+            for i, s in ipairs(series) do
+                drawLineSet(s, palette[((i - 1) % #palette) + 1], true, 0, 2)
+            end
         end
+    end
+
+    local function requestRedraw()
+        needsRedraw = true
+    end
+
+    local renderConn
+    renderConn = RunService.Heartbeat:Connect(function()
+        if not frame or not frame.Parent then
+            if renderConn then
+                pcall(function()
+                    renderConn:Disconnect()
+                end)
+                renderConn = nil
+            end
+
+            autoRunning = false
+            return
+        end
+
+        if needsRedraw then
+            if canvas.AbsoluteSize.X >= 20 and canvas.AbsoluteSize.Y >= 20 then
+                needsRedraw = false
+                redraw()
+            end
+        end
+    end)
+
+    canvas:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+        if canvas.AbsoluteSize.X >= 20 and canvas.AbsoluteSize.Y >= 20 then
+            requestRedraw()
+        end
+    end)
+
+    -- На случай, если AbsoluteSize не更新了 сигнал, но размер уже появился
+    task.spawn(function()
+        for _ = 1, 30 do
+            if not frame.Parent then
+                return
+            end
+
+            if canvas.AbsoluteSize.X >= 20 and canvas.AbsoluteSize.Y >= 20 then
+                requestRedraw()
+                return
+            end
+
+            task.wait(0.05)
+        end
+    end)
+
+    registerThemeElement(frame, function()
+        frame.BackgroundColor3 = Theme.Secondary
+        st.Color = Theme.Accent
+        titleLbl.TextColor3 = Theme.Text
+        canvas.BackgroundColor3 = Theme.Tertiary
+
+        for _, gl in ipairs(gridLines) do
+            if gl and gl.Parent then
+                gl.BackgroundColor3 = Theme.Secondary
+            end
+        end
+
+        palette = {
+            Theme.Accent,
+            Theme.Success,
+            Theme.Warning,
+            Theme.Danger,
+            Theme.Info,
+            Color3.fromRGB(180, 100, 255),
+            Color3.fromRGB(255, 100, 180)
+        }
+
+        requestRedraw()
+    end)
+
+    api.AddPoint = function(first, second)
+        local v = normalizeCall(first, second)
+        v = tonumber(v) or 0
+
+        table.insert(data, v)
+
+        if #data > maxPoints then
+            table.remove(data, 1)
+        end
+
+        if autoRange then
+            recalcAutoRange()
+        end
+
+        requestRedraw()
+        return api
+    end
+
+    api.SetData = function(first, second)
+        local arr = normalizeCall(first, second)
+
+        data = {}
+
+        if type(arr) == "table" then
+            for _, v in ipairs(arr) do
+                table.insert(data, tonumber(v) or 0)
+            end
+        end
+
+        series = { data }
+
+        if autoRange then
+            recalcAutoRange()
+        end
+
+        requestRedraw()
+        return api
+    end
+
+    api.GetData = function()
+        return data
+    end
+
+    api.GetSeries = function()
+        return series
+    end
+
+    api.Clear = function()
+        data = {}
+        series = { data }
+        clearContainer()
+        requestRedraw()
+        return api
+    end
+
+    api.AddSeries = function(first, second)
+        local arr = normalizeCall(first, second)
+        local ns = {}
+
+        if type(arr) == "table" then
+            for _, v in ipairs(arr) do
+                table.insert(ns, tonumber(v) or 0)
+            end
+        end
+
+        table.insert(series, ns)
+
+        if autoRange then
+            recalcAutoRange()
+        end
+
+        requestRedraw()
+        return api
+    end
+
+    api.ClearSeries = function()
+        series = { data }
+
+        if autoRange then
+            recalcAutoRange()
+        end
+
+        requestRedraw()
+        return api
+    end
+
+    api.SetRange = function(first, second, third)
+        local mn, mx = normalizeCall(first, second, third)
+
+        minValue = tonumber(mn) or 0
+        maxValue = tonumber(mx) or 100
+
+        if maxValue == minValue then
+            maxValue = minValue + 1
+        end
+
+        autoRange = false
+        requestRedraw()
+
+        return api
+    end
+
+    api.SetAutoRange = function(first, second)
+        local enabled = normalizeCall(first, second)
+        autoRange = enabled ~= false
+
+        recalcAutoRange()
+        requestRedraw()
+
+        return api
+    end
+
+    api.SetType = function(first, second)
+        local t = normalizeCall(first, second)
+        graphType = normalizeGraphType(t)
+
+        for _, gl in ipairs(gridLines) do
+            if gl and gl.Parent then
+                gl.Visible = (graphType ~= "pie" and graphType ~= "radial")
+            end
+        end
+
+        requestRedraw()
+        return api
+    end
+
+    api.SetMaxPoints = function(first, second)
+        local n = normalizeCall(first, second)
+        maxPoints = math.max(tonumber(n) or 50, 2)
+
+        while #data > maxPoints do
+            table.remove(data, 1)
+        end
+
+        requestRedraw()
+        return api
+    end
+
+    api.Redraw = function()
+        requestRedraw()
+        return api
+    end
+
+    api.AutoUpdate = function(first, second, third, fourth)
+        local interval, mn, mx = normalizeCall(first, second, third, fourth)
+
+        if autoRunning then
+            return api
+        end
+
+        interval = tonumber(interval) or 1
+
+        local explicitRange = (mn ~= nil or mx ~= nil)
+        local fixedMin = tonumber(mn) or minValue
+        local fixedMax = tonumber(mx) or maxValue
+
+        if fixedMax == fixedMin then
+            fixedMax = fixedMin + 1
+        end
+
+        autoRunning = true
+
+        task.spawn(function()
+            while autoRunning and frame and frame.Parent and canvas and canvas.Parent do
+                local lo, hi
+
+                if explicitRange then
+                    lo, hi = fixedMin, fixedMax
+                else
+                    lo, hi = minValue, maxValue
+                end
+
+                if hi == lo then
+                    hi = lo + 1
+                end
+
+                local v = lo + math.random() * (hi - lo)
+                api.AddPoint(v)
+
+                task.wait(math.max(interval, 0.03))
+            end
+        end)
+
+        return api
+    end
+
+    api.StopAutoUpdate = function()
+        autoRunning = false
+        return api
+    end
+
+    api.AnimateColor = function(first, second, third, fourth)
+        local c1, c2, duration = normalizeCall(first, second, third, fourth)
+        return BeautifulUI.AnimatedColor(canvas, "BackgroundColor3", c1, c2, duration)
+    end
+
+    api.AnimateGradient = function(first, second, third)
+        local colors, speed = normalizeCall(first, second, third)
+        return BeautifulUI.AnimatedGradient(canvas, colors, speed)
+    end
+
+    api.Destroy = function()
+        autoRunning = false
+
+        if renderConn then
+            pcall(function()
+                renderConn:Disconnect()
+            end)
+            renderConn = nil
+        end
+
+        clearContainer()
+
+        if frame and frame.Parent then
+            pcall(function()
+                frame:Destroy()
+            end)
+        end
+
+        return api
+    end
+
+    task.defer(requestRedraw)
+
+    return api
+end
+
         function TabAPI:SearchBar()
             local searchFrame = Create("Frame", {Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = Theme.Tertiary, BorderSizePixel = 0, Parent = page})
             Corner(6, searchFrame)
