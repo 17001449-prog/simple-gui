@@ -1266,6 +1266,7 @@ function BeautifulUI:CreateWindow(config)
         end
 
         function TabAPI:Graph(text, graphType, height)
+        function TabAPI:Graph(text, graphType, height)
             graphType = graphType or "Line"
             height = height or 160
             local frame = Create("Frame", {Size = UDim2.new(1, 0, 0, height + 40), BackgroundColor3 = Theme.Secondary, BorderSizePixel = 0, Parent = page})
@@ -1284,7 +1285,6 @@ function BeautifulUI:CreateWindow(config)
             })
             Corner(6, canvas)
 
-            -- Сетка
             local gridLines = {}
             if graphType ~= "Pie" then
                 for i = 1, 4 do
@@ -1300,7 +1300,6 @@ function BeautifulUI:CreateWindow(config)
                 end
             end
 
-            -- Контейнер для сегментов
             local container = Create("Frame", {
                 Name = "GraphContainer",
                 Size = UDim2.new(1, 0, 1, 0),
@@ -1317,17 +1316,17 @@ function BeautifulUI:CreateWindow(config)
 
             local function clearContainer()
                 for _, c in ipairs(container:GetChildren()) do
-                    pcall(function() c:Destroy() end)
+                    c:Destroy()
                 end
             end
 
-            local function drawSegment(x1, y1, x2, y2, color, zIndex, transparency, thickness)
+            local function drawSegment(x1, y1, x2, y2, color, zIndex, transparency)
                 local dx, dy = x2 - x1, y2 - y1
                 local len = math.sqrt(dx * dx + dy * dy)
                 if len < 0.5 then return end
                 local ang = math.deg(math.atan2(dy, dx))
                 local seg = Instance.new("Frame")
-                seg.Size = UDim2.new(0, len, 0, thickness or 2)
+                seg.Size = UDim2.new(0, len, 0, 2)
                 seg.Position = UDim2.new(0, x1, 0, y1)
                 seg.AnchorPoint = Vector2.new(0, 0.5)
                 seg.BackgroundColor3 = color
@@ -1336,6 +1335,7 @@ function BeautifulUI:CreateWindow(config)
                 seg.Rotation = ang
                 seg.ZIndex = zIndex or 10
                 seg.Parent = container
+                return seg
             end
 
             local function drawDot(x, y, size, color, zIndex)
@@ -1349,29 +1349,48 @@ function BeautifulUI:CreateWindow(config)
                 local c = Instance.new("UICorner")
                 c.CornerRadius = UDim.new(0, size/2)
                 c.Parent = dot
+                return dot
             end
 
-            -- ═══ ОСНОВНАЯ ФУНКЦИЯ ОТРИСОВКИ (безопасная) ═══
+            -- ═══ ОСНОВНАЯ ОТРИСОВКА (БЕЗ pcall — падает громко) ═══
             local function redraw()
+                print("[Graph] === redraw START ===")
+                print("[Graph] type:", graphType)
+                print("[Graph] #data:", #data)
+                print("[Graph] canvas:", canvas.AbsoluteSize)
+                print("[Graph] container:", container.AbsoluteSize, "children:", #container:GetChildren())
+
                 clearContainer()
-                if #data < 2 then return end
-                
-                -- 🔑 КЛЮЧЕВОЕ: получаем размер canvas безопасно
+                print("[Graph] cleared container")
+
+                if #data < 2 then
+                    print("[Graph] EXIT: #data < 2")
+                    return
+                end
+
                 local w = canvas.AbsoluteSize.X
                 local h = canvas.AbsoluteSize.Y
-                if w < 30 or h < 30 then return end
-                
+                print("[Graph] w, h:", w, h)
+
+                if w < 30 or h < 30 then
+                    print("[Graph] EXIT: canvas too small")
+                    return
+                end
+
                 local pad = 12
                 local usableW = w - pad * 2
                 local usableH = h - pad * 2
-                
+                print("[Graph] usable:", usableW, usableH)
+
                 -- ─── LINE ───
                 if graphType == "Line" then
+                    print("[Graph] drawing Line...")
                     for i = 1, #data - 1 do
                         local x1 = pad + (i - 1) / math.max(#data - 1, 1) * usableW
                         local x2 = pad + i / math.max(#data - 1, 1) * usableW
                         local y1 = pad + usableH - (data[i] / 100) * usableH
                         local y2 = pad + usableH - (data[i + 1] / 100) * usableH
+                        print(string.format("[Graph] seg %d: (%d,%d) → (%d,%d)", i, x1, y1, x2, y2))
                         drawSegment(x1, y1, x2, y2, Theme.Accent, 10)
                     end
                     for i, v in ipairs(data) do
@@ -1379,9 +1398,10 @@ function BeautifulUI:CreateWindow(config)
                         local y = pad + usableH - (v / 100) * usableH
                         drawDot(x, y, 5, Theme.Accent, 11)
                     end
-                
+
                 -- ─── AREA ───
                 elseif graphType == "Area" then
+                    print("[Graph] drawing Area...")
                     local barW = math.max(usableW / math.max(#data - 1, 1), 2)
                     for i = 1, #data - 1 do
                         local x = pad + (i - 1) / math.max(#data - 1, 1) * usableW
@@ -1405,9 +1425,10 @@ function BeautifulUI:CreateWindow(config)
                         local y2 = pad + usableH - (data[i + 1] / 100) * usableH
                         drawSegment(x1, y1, x2, y2, Theme.Accent, 10)
                     end
-                
+
                 -- ─── BAR ───
                 elseif graphType == "Bar" then
+                    print("[Graph] drawing Bar...")
                     local gap = 3
                     local barW = math.max((w - pad * 2 - gap * (#data - 1)) / #data, 3)
                     for i, v in ipairs(data) do
@@ -1424,17 +1445,19 @@ function BeautifulUI:CreateWindow(config)
                         c.CornerRadius = UDim.new(0, 3)
                         c.Parent = bar
                     end
-                
+
                 -- ─── SCATTER ───
                 elseif graphType == "Scatter" then
+                    print("[Graph] drawing Scatter...")
                     for i, v in ipairs(data) do
                         local x = pad + (i - 1) / math.max(#data - 1, 1) * usableW
                         local y = pad + usableH - (v / 100) * usableH
                         drawDot(x, y, 8, palette[(i - 1) % #palette + 1], 11)
                     end
-                
+
                 -- ─── PIE ───
                 elseif graphType == "Pie" then
+                    print("[Graph] drawing Pie...")
                     local total = 0
                     for _, v in ipairs(data) do total = total + v end
                     if total > 0 then
@@ -1476,9 +1499,10 @@ function BeautifulUI:CreateWindow(config)
                         ic.CornerRadius = UDim.new(0, radius/2)
                         ic.Parent = inner
                     end
-                
+
                 -- ─── RADIAL ───
                 elseif graphType == "Radial" then
+                    print("[Graph] drawing Radial...")
                     local cx, cy = w / 2, h / 2
                     local maxR = math.min(cx, cy) - 12
                     local n = #data
@@ -1513,9 +1537,10 @@ function BeautifulUI:CreateWindow(config)
                         local y2 = cy + math.sin(ang2) * r2
                         drawSegment(x1, y1, x2, y2, Theme.Accent, 10)
                     end
-                
+
                 -- ─── STACKED ───
                 elseif graphType == "Stacked" then
+                    print("[Graph] drawing Stacked...")
                     for sIdx, sData in ipairs(series) do
                         if #sData >= 2 then
                             local color = palette[((sIdx - 1) % #palette) + 1]
@@ -1529,32 +1554,35 @@ function BeautifulUI:CreateWindow(config)
                         end
                     end
                 end
+
+                print("[Graph] container after redraw:", #container:GetChildren())
+                print("[Graph] === redraw END ===")
             end
 
-            -- 🎯 Отложенный redraw (retry 20 раз)
+            -- Отложенный redraw
             local function safeRedraw()
                 local attempts = 0
                 local function try()
                     attempts = attempts + 1
+                    print("[Graph] tryRedraw attempt", attempts, "canvas width:", canvas.AbsoluteSize.X)
                     local w = canvas.AbsoluteSize.X
                     if w >= 30 then
-                        local ok, err = pcall(redraw)
-                        if not ok then warn("[Graph] redraw error:", err) end
+                        redraw()
                         return
                     end
-                    if attempts >= 20 then 
+                    if attempts >= 20 then
                         warn("[Graph] canvas never got size")
-                        return 
+                        return
                     end
                     task.delay(0.1, try)
                 end
                 try()
             end
 
-            -- Автоматическая перерисовка при изменении размера
             canvas:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+                print("[Graph] canvas size changed:", canvas.AbsoluteSize)
                 if canvas.AbsoluteSize.X >= 30 then
-                    pcall(redraw)
+                    redraw()
                 end
             end)
 
@@ -1567,7 +1595,7 @@ function BeautifulUI:CreateWindow(config)
                     gl.BackgroundColor3 = Theme.Secondary
                 end
                 palette = {Theme.Accent, Theme.Success, Theme.Warning, Theme.Danger, Theme.Info, Color3.fromRGB(180,100,255), Color3.fromRGB(255,100,180)}
-                pcall(redraw)
+                redraw()
             end)
 
             return {
