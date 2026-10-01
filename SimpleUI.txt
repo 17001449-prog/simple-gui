@@ -1733,6 +1733,7 @@ function BeautifulUI:CreateWindow(config)
         end
 
         return TabAPI
+    end 
 function TabAPI:Graph(text, graphType, height)
     -- Нормализация типов
     local function normalizeGraphType(t)
