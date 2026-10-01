@@ -270,21 +270,36 @@ function BeautifulUI.AnimatedImage(imageLabel, frames, fps)
             lastIdx = idx
         end
     end)
-
     return {Disconnect = function() StopAnimation(imageLabel, "_image") end}
 end
 
--- 🌈 Rainbow
 function BeautifulUI.Rainbow(instance, prop, speed, saturation, value)
-    prop = prop or "BackgroundColor3"
+    -- 🎯 ФИКС 1: защита от nil
+    if prop == nil then
+        prop = "BackgroundColor3"
+    end
+    -- 🎯 ФИКС 2: защита от Instance (если передали не prop а объект)
+    if type(prop) ~= "string" then
+        prop = "BackgroundColor3"
+    end
+    
     speed = speed or 0.1
     saturation = saturation or 1
     value = value or 1
-    local entry = RegisterAnimation(instance, "_rainbow_" .. prop, function(dt, now)
+
+    -- 🎯 ФИКС 3: используем безопасную проверку
+    local propName = tostring(prop)
+    
+    local entry = RegisterAnimation(instance, "_rainbow_" .. propName, function(dt, now)
         local hue = (now * speed) % 1
         instance[prop] = Color3.fromHSV(hue, saturation, value)
     end)
-    return {Disconnect = function() StopAnimation(instance, "_rainbow_" .. prop) end}
+
+    return {
+        Disconnect = function()
+            StopAnimation(instance, "_rainbow_" .. propName)
+        end
+    }
 end
 
 -- 💓 Breathe
@@ -1250,7 +1265,7 @@ function BeautifulUI:CreateWindow(config)
                 if fire and callback then pcall(callback, state) end
             end
             frame.MouseButton1Click:Connect(function() state = not state; update(true) end)
-            local api = {Set = function(v) state = v; update(false) end, Get = function() return state end}
+            local api = {Set = function(a, b) local v = (a == api) and b or a; state = v; update(false) end, Get = function() return state end}
             if flag then ConfigFlags[flag] = api end
             registerThemeElement(frame, function()
                 frame.BackgroundColor3 = Theme.Secondary; lbl.TextColor3 = Theme.Text
@@ -1281,7 +1296,7 @@ function BeautifulUI:CreateWindow(config)
                 if fire and callback then pcall(callback, state) end
             end
             frame.MouseButton1Click:Connect(function() state = not state; update(true) end)
-            local api = {Set = function(v) state = v; update(false) end, Get = function() return state end}
+            local api = {Set = function(a, b) local v = (a == api) and b or a; state = v; update(false) end, Get = function() return state end}
             if flag then ConfigFlags[flag] = api end
             registerThemeElement(frame, function()
                 frame.BackgroundColor3 = Theme.Secondary
@@ -1323,16 +1338,17 @@ function BeautifulUI:CreateWindow(config)
             UserInputService.InputChanged:Connect(function(i) if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then setVal(i.Position.X, true) end end)
             UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end end)
 
-            local api = {Set = function(v)
-                v = math.clamp(v, min, max)
-                if v == value then return end
-                updating = true
-                value = v
-                local rel = (value - min) / (max - min)
-                fill.Size = UDim2.new(rel, 0, 1, 0)
-                valueLabel.Text = tostring(value)
-                updating = false
-            end, Get = function() return value end}
+            local api = {Set = function(a, b)
+    local v = (type(a) == "table" and a == api) and b or a
+    v = math.clamp(tonumber(v) or 0, min, max)
+    if v == value then return end
+    updating = true
+    value = v
+    local rel = (value - min) / (max - min)
+    fill.Size = UDim2.new(rel, 0, 1, 0)
+    valueLabel.Text = tostring(value)
+    updating = false
+end, Get = function() return value end}
             if flag then ConfigFlags[flag] = api end
             registerThemeElement(frame, function()
                 frame.BackgroundColor3 = Theme.Secondary; lbl.TextColor3 = Theme.Text
@@ -1387,7 +1403,12 @@ function BeautifulUI:CreateWindow(config)
             UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end end)
             valueBox.FocusLost:Connect(function() local p = tonumber(valueBox.Text); if p then setValue(p, true) else updateUI() end end)
 
-            local api = {Set = function(v) updating = true; setValue(v, false); updating = false end, Get = function() return value end}
+            local api = {Set = function(a, b)
+    local v = (type(a) == "table" and a == api) and b or a
+    updating = true
+    setValue(v, false)
+    updating = false
+end, Get = function() return value end}
             if flag then ConfigFlags[flag] = api end
             registerThemeElement(frame, function()
                 frame.BackgroundColor3 = Theme.Secondary; lbl.TextColor3 = Theme.Text
