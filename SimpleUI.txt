@@ -2345,9 +2345,5 @@ end
     end)
 
     return Window
--- А сам метод объяви ДО Window:Tab как TabAPI:Graph
--- 
--- ⚠️ ВАЖНО: Твой Graph должен быть внутри функции Window:Tab (внутри TabAPI),
--- НЕ снаружи. Вставь его вместо этого комментария.
 
 return BeautifulUI
