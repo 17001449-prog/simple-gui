@@ -1753,7 +1753,7 @@ end, Get = function() return value end}
             return SubAPI
         end
 function TabAPI:Graph(text, graphType, height)
-    -- Нормализация типов
+    -- === НАСТРОЙКИ И ТИПЫ ===
     local function normalizeGraphType(t)
         t = tostring(t or "line"):lower():gsub("%s+", "")
         local map = {
@@ -1769,12 +1769,14 @@ function TabAPI:Graph(text, graphType, height)
     end
 
     if typeof(height) == "UDim2" then height = height.Offset end
-    height = math.max(tonumber(height) or 160, 60)
+    height = math.max(tonumber(height) or 160, 80) -- Минимум 80px для места под скроллер
     graphType = normalizeGraphType(graphType)
 
-    -- Создание контейнера
+    -- === СОЗДАНИЕ ЭЛЕМЕНТОВ ИНТЕРФЕЙСА ===
+    
+    -- Главный контейнер окна графика
     local frame = Create("Frame", {
-        Size = UDim2.new(1, 0, 0, height + 40),
+        Size = UDim2.new(1, 0, 0, height + 70), -- +70 для заголовка, графика и скроллера
         BackgroundColor3 = Theme.Secondary,
         BorderSizePixel = 0,
         Parent = page
@@ -1782,6 +1784,7 @@ function TabAPI:Graph(text, graphType, height)
     Corner(8, frame)
     local st = Stroke(Theme.Accent, 1, 0.7, frame)
 
+    -- Заголовок
     local titleLbl = Create("TextLabel", {
         Size = UDim2.new(1, -20, 0, 20),
         Position = UDim2.new(0, 12, 0, 6),
@@ -1794,11 +1797,37 @@ function TabAPI:Graph(text, graphType, height)
         Parent = frame
     })
 
+    -- Панель статистики (появляется при взаимодействии)
+    local statsPanel = Create("Frame", {
+        Size = UDim2.new(1, -24, 0, 24),
+        Position = UDim2.new(0, 12, 0, 28),
+        BackgroundColor3 = Theme.Tertiary,
+        BorderSizePixel = 0,
+        Visible = false,
+        ZIndex = 20,
+        Parent = frame
+    })
+    Corner(4, statsPanel)
+    
+    local statText = Create("TextLabel", {
+        Size = UDim2.new(1, -10, 1, 0),
+        Position = UDim2.new(0, 5, 0, 0),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.Code,
+        Text = "",
+        TextColor3 = Theme.Success,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = statsPanel
+    })
+
+    -- Канвас самого графика
+    local canvasHeight = height - 24 -- Место под скроллер ниже
     local canvas = Create("Frame", {
         Name = "GraphCanvas",
-        Size = UDim2.new(1, -24, 0, height),
-        Position = UDim2.new(0, 12, 0, 32),
-        BackgroundColor3 = Theme.Tertiary,
+        Size = UDim2.new(1, -24, 0, canvasHeight),
+        Position = UDim2.new(0, 12, 0, 52), -- Сдвинут вниз из-за панели статистики
+        BackgroundColor3 = Theme.Background,
         BorderSizePixel = 0,
         ClipsDescendants = true,
         ZIndex = 1,
@@ -1806,13 +1835,13 @@ function TabAPI:Graph(text, graphType, height)
     })
     Corner(6, canvas)
 
-    -- Сетка (Grid Lines) - статичные, создаем один раз
+    -- Сетка (Grid Lines)
     local gridLines = {}
     for i = 1, 4 do
         local gl = Create("Frame", {
             Size = UDim2.new(1, 0, 0, 1),
             Position = UDim2.new(0, 0, i / 5, 0),
-            BackgroundColor3 = Theme.Secondary,
+            BackgroundColor3 = Theme.Tertiary,
             BackgroundTransparency = 0.5,
             BorderSizePixel = 0,
             ZIndex = 2,
@@ -1822,7 +1851,7 @@ function TabAPI:Graph(text, graphType, height)
         table.insert(gridLines, gl)
     end
 
-    -- Контейнер для данных
+    -- Контейнер для динамических элементов (линии, точки)
     local container = Create("Frame", {
         Name = "GraphContainer",
         Size = UDim2.new(1, 0, 1, 0),
@@ -1832,45 +1861,82 @@ function TabAPI:Graph(text, graphType, height)
         Parent = canvas
     })
 
-    -- Данные и настройки
-    local data = {}
-    local series = { {name = "Series 1", data = data} } 
+    -- Вертикальная линия-курсор (для Time Scrubber)
+    local cursorLine = Create("Frame", {
+        Size = UDim2.new(0, 1, 1, 0),
+        Position = UDim2.new(0.5, 0, 0, 0),
+        BackgroundColor3 = Theme.Warning,
+        BorderSizePixel = 0,
+        Visible = false,
+        ZIndex = 15,
+        Parent = canvas
+    })
+
+    -- === TIME SCRUBBER (ПОЛЗУНОК ВРЕМЕНИ) ===
+    local scrubberBg = Create("Frame", {
+        Size = UDim2.new(1, -24, 0, 16),
+        Position = UDim2.new(0, 12, 1, -20),
+        BackgroundColor3 = Theme.Tertiary,
+        BorderSizePixel = 0,
+        Parent = frame
+    })
+    Corner(8, scrubberBg)
+
+    local scrubberFill = Create("Frame", {
+        Size = UDim2.new(0, 0, 1, 0),
+        BackgroundColor3 = Theme.Accent,
+        BorderSizePixel = 0,
+        Parent = scrubberBg
+    })
+    Corner(8, scrubberFill)
+
+    local scrubberKnob = Create("Frame", {
+        Size = UDim2.new(0, 12, 1, 4),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0, 0, 0.5, 0),
+        BackgroundColor3 = Theme.Text,
+        BorderSizePixel = 0,
+        Parent = scrubberBg
+    })
+    Corner(6, scrubberKnob)
+
+    -- === ДАННЫЕ И ЛОГИКА ===
+    
+    local dataBuffer = {} -- Хранит сырые значения
+    local maxHistory = 100 -- Максимум точек в истории
+    local seriesMeta = { name = "Series 1", color = Color3.fromRGB(0, 255, 255) }
+    
     local minValue = 0
     local maxValue = 100
     local autoRange = false
-    local maxPoints = 50
     
+    -- Текущее положение курсора (0.0 до 1.0 по ширине графика)
+    -- Если nil, значит мы смотрим на последние данные (Live Mode)
+    local viewOffset = nil 
+
     local palette = {
-        Color3.fromRGB(0, 255, 255), -- Cyan
-        Color3.fromRGB(255, 200, 50), -- Yellow
-        Color3.fromRGB(255, 100, 100), -- Red/Pink
-        Color3.fromRGB(150, 100, 255), -- Purple
-        Color3.fromRGB(100, 255, 100), -- Green
-        Color3.fromRGB(255, 150, 50), -- Orange
-        Color3.fromRGB(100, 150, 255), -- Blue
+        Color3.fromRGB(0, 255, 255), 
+        Color3.fromRGB(255, 200, 50), 
+        Color3.fromRGB(255, 100, 100), 
+        Color3.fromRGB(150, 100, 255), 
+        Color3.fromRGB(100, 255, 100), 
     }
 
     local needsRedraw = false
     local api = {}
 
-    -- Вспомогательные функции
+    -- --- Вспомогательные функции ---
+
     local function recalcAutoRange()
-        if not autoRange then return end
-        local mn, mx
-        for _, s in ipairs(series) do
-            for _, v in ipairs(s.data) do
-                v = tonumber(v)
-                if v then
-                    if not mn or v < mn then mn = v end
-                    if not mx or v > mx then mx = v end
-                end
-            end
+        if not autoRange or #dataBuffer == 0 then return end
+        local mn, mx = dataBuffer[1], dataBuffer[1]
+        for _, v in ipairs(dataBuffer) do
+            if v < mn then mn = v end
+            if v > mx then mx = v end
         end
-        if mn then
-            minValue = mn
-            maxValue = mx
-            if maxValue == minValue then maxValue = minValue + 1 end
-        end
+        minValue = mn
+        maxValue = mx
+        if maxValue == minValue then maxValue = minValue + 1 end
     end
 
     local function norm(v)
@@ -1885,66 +1951,9 @@ function TabAPI:Graph(text, graphType, height)
         end
     end
 
-    -- 🖱️ СИСТЕМА TOOLTIP (Подсказки)
-    local tooltipGui = Instance.new("ScreenGui")
-    tooltipGui.ResetOnSpawn = false
-    tooltipGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    tooltipGui.Parent = (gethui and gethui()) or CoreGui
-
-    local tooltipFrame = Instance.new("Frame")
-    tooltipFrame.Size = UDim2.new(0, 140, 0, 50)
-    tooltipFrame.BackgroundColor3 = Theme.Background
-    tooltipFrame.BorderSizePixel = 0
-    tooltipFrame.Visible = false
-    tooltipFrame.Active = true
-    tooltipFrame.ZIndex = 100
-    tooltipFrame.Parent = tooltipGui
-    Corner(6, tooltipFrame)
-    Stroke(Theme.Accent, 1, 0.2, tooltipFrame)
-
-    local ttIndicator = Instance.new("Frame")
-    ttIndicator.Size = UDim2.new(0, 6, 0, 6)
-    ttIndicator.Position = UDim2.new(0, 8, 0, 8)
-    ttIndicator.BackgroundColor3 = Color3.new(1,1,1)
-    ttIndicator.BorderSizePixel = 0
-    ttIndicator.Parent = tooltipFrame
-    Corner(1, ttIndicator)
-
-    local tooltipTitle = Instance.new("TextLabel")
-    tooltipTitle.Size = UDim2.new(1, -20, 0, 16)
-    tooltipTitle.Position = UDim2.new(0, 18, 0, 4)
-    tooltipTitle.BackgroundTransparency = 1
-    tooltipTitle.Font = Enum.Font.GothamBold
-    tooltipTitle.TextSize = 11
-    tooltipTitle.TextColor3 = Theme.SubText
-    tooltipTitle.TextXAlignment = Enum.TextXAlignment.Left
-    tooltipTitle.Text = "Series"
-    tooltipTitle.Parent = tooltipFrame
-
-    local tooltipValue = Instance.new("TextLabel")
-    tooltipValue.Size = UDim2.new(1, -16, 0, 20)
-    tooltipValue.Position = UDim2.new(0, 8, 0, 22)
-    tooltipValue.BackgroundTransparency = 1
-    tooltipValue.Font = Enum.Font.Code
-    tooltipValue.TextSize = 14
-    tooltipValue.TextColor3 = Theme.Text
-    tooltipValue.TextXAlignment = Enum.TextXAlignment.Left
-    tooltipValue.Text = "0.00"
-    tooltipValue.Parent = tooltipFrame
-
-    UserInputService.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement then
-            if tooltipFrame.Visible then
-                tooltipFrame.Position = UDim2.new(0, input.Position.X + 15, 0, input.Position.Y + 15)
-            end
-        end
-    end)
-
-    -- ⚡ ОПТИМИЗИРОВАННАЯ ОТРИСОВКА ЛИНИИ
-    -- Используем один Frame с Rotation, но округляем координаты до целых чисел
-    -- Это устраняет "дрожание" субпиксельного рендера Roblox
-    local function drawOptimizedLine(x1, y1, x2, y2, color, thickness, zIndex)
-        -- Округляем координаты! Критически важно для стабильности
+    -- --- ОПТИМИЗИРОВАННАЯ ОТРИСОВКА ЛИНИИ (1 Объект = 1 Сегмент) ---
+    -- Критически важно: используем math.floor для устранения дребезга
+    local function drawLineSegment(x1, y1, x2, y2, color, thickness, zIndex)
         local ix1, iy1 = math.floor(x1 + 0.5), math.floor(y1 + 0.5)
         local ix2, iy2 = math.floor(x2 + 0.5), math.floor(y2 + 0.5)
 
@@ -1967,258 +1976,204 @@ function TabAPI:Graph(text, graphType, height)
         seg.Parent = container
     end
 
-    -- Функция создания интерактивной точки с тултипом
-    local function createInteractiveDot(x, y, size, color, seriesName, index, value)
-        local dot = Instance.new("Frame")
-        dot.Size = UDim2.new(0, size, 0, size)
-        -- Также округляем позицию точки
-        dot.Position = UDim2.new(0, math.floor(x - size/2 + 0.5), 0, math.floor(y - size/2 + 0.5))
-        dot.BackgroundColor3 = color
-        dot.BorderSizePixel = 0
-        dot.ZIndex = 12
-        dot.Parent = container
-        
-        Corner(size/2, dot)
-
-        local hitbox = Instance.new("TextButton")
-        hitbox.Size = UDim2.new(0, size + 8, 0, size + 8)
-        hitbox.Position = UDim2.new(0, math.floor(x - (size+8)/2 + 0.5), 0, math.floor(y - (size+8)/2 + 0.5))
-        hitbox.BackgroundTransparency = 1
-        hitbox.Text = ""
-        hitbox.ZIndex = 13
-        hitbox.Parent = container
-
-        hitbox.MouseEnter:Connect(function()
-            tooltipTitle.Text = string.format("%s #%d", seriesName, index)
-            tooltipValue.Text = string.format("%.2f", value)
-            ttIndicator.BackgroundColor3 = color
-            tooltipFrame.Visible = true
-        end)
-
-        hitbox.MouseLeave:Connect(function()
-            tooltipFrame.Visible = false
-        end)
-        
-        return dot
-    end
-
+    -- --- ОСНОВНАЯ ФУНКЦИЯ ПЕРЕРИСОВКИ ---
     local function redraw()
         clearContainer()
-        if #series == 0 then return end
-
+        
         local w = canvas.AbsoluteSize.X
         local h = canvas.AbsoluteSize.Y
-        
         if w <= 0 or h <= 0 then return end
-        if w < 20 or h < 20 then return end
 
-        local pad = 12
+        local pad = 10
         local usableW = w - pad * 2
         local usableH = h - pad * 2
         if usableW < 10 or usableH < 10 then return end
 
+        -- Определяем, какие данные показывать
+        -- Если viewOffset == nil, показываем все данные (Live)
+        -- Иначе показываем окно данных вокруг viewOffset
+        
+        local displayData = dataBuffer
+        local startIndex = 1
+        local endIndex = #displayData
+
+        -- Логика зума/скролла пока упрощена: всегда рисуем весь буфер, 
+        -- но курсор показывает конкретную точку.
+        -- Для полноценного скроллинга нужно менять slice массива, 
+        -- но это сложнее. Сейчас: Рисуем всю историю, курсор бегает по ней.
+
         if graphType == "line" or graphType == "area" or graphType == "stacked" then
             
-            -- Area Fill (упрощенный: только прямоугольники под линией, без сложных полигонов для скорости)
-            if graphType == "area" then
-                for si, s in ipairs(series) do
-                    local color = palette[((si - 1) % #palette) + 1]
-                    local d = s.data
-                    if #d >= 2 then
-                        for i = 1, #d - 1 do
-                            local x = pad + (i - 1) / (#d - 1) * usableW
-                            local y1 = pad + usableH - norm(d[i]) * usableH
-                            local y2 = pad + usableH - norm(d[i+1]) * usableH
-                            
-                            local rect = Instance.new("Frame")
-                            rect.Size = UDim2.new(0, usableW/(#d-1)+1, 0, math.abs(y2-y1))
-                            rect.Position = UDim2.new(0, math.floor(x+0.5), 0, math.floor(math.min(y1,y2)+0.5))
-                            rect.BackgroundColor3 = color
-                            rect.BackgroundTransparency = 0.6
-                            rect.BorderSizePixel = 0
-                            rect.ZIndex = 8
-                            rect.Parent = container
-                        end
-                    end
+            -- Area Fill
+            if graphType == "area" and #displayData >= 2 then
+                for i = 1, #displayData - 1 do
+                    local x = pad + (i - 1) / (#displayData - 1) * usableW
+                    local y1 = pad + usableH - norm(displayData[i]) * usableH
+                    local y2 = pad + usableH - norm(displayData[i+1]) * usableH
+                    
+                    local rect = Instance.new("Frame")
+                    rect.Size = UDim2.new(0, usableW/(#displayData-1)+1, 0, math.abs(y2-y1))
+                    rect.Position = UDim2.new(0, math.floor(x+0.5), 0, math.floor(math.min(y1,y2)+0.5))
+                    rect.BackgroundColor3 = seriesMeta.color
+                    rect.BackgroundTransparency = 0.6
+                    rect.BorderSizePixel = 0
+                    rect.ZIndex = 8
+                    rect.Parent = container
                 end
             end
 
-            -- Lines & Dots
-            for si, s in ipairs(series) do
-                local color = palette[((si - 1) % #palette) + 1]
-                local d = s.data
-                
-                if #d >= 2 then
-                    -- Рисуем линии одним проходом
-                    for i = 1, #d - 1 do
-                        local x1 = pad + (i - 1) / (#d - 1) * usableW
-                        local x2 = pad + i / (#d - 1) * usableW
-                        local y1 = pad + usableH - norm(d[i]) * usableH
-                        local y2 = pad + usableH - norm(d[i+1]) * usableH
-                        
-                        drawOptimizedLine(x1, y1, x2, y2, color, 2, 10)
-                    end
+            -- Lines
+            if #displayData >= 2 then
+                for i = 1, #displayData - 1 do
+                    local x1 = pad + (i - 1) / (#displayData - 1) * usableW
+                    local x2 = pad + i / (#displayData - 1) * usableW
+                    local y1 = pad + usableH - norm(displayData[i]) * usableH
+                    local y2 = pad + usableH - norm(displayData[i+1]) * usableH
                     
-                    -- Точки (только если это Line/Area, для Stacked часто скрывают)
-                    if graphType ~= "stacked" then
-                         for i, v in ipairs(d) do
-                            local x = pad + (i - 1) / math.max(#d - 1, 1) * usableW
-                            local y = pad + usableH - norm(v) * usableH
-                            createInteractiveDot(x, y, 5, color, s.name, i, v)
-                        end
-                    end
-                elseif #d == 1 then
-                     local x = pad + usableW / 2
-                     local y = pad + usableH - norm(d[1]) * usableH
-                     createInteractiveDot(x, y, 5, color, s.name, 1, d[1])
+                    drawLineSegment(x1, y1, x2, y2, seriesMeta.color, 2, 10)
+                end
+            end
+
+            -- Interactive Dots (только если мало точек, иначе лагает)
+            if #displayData <= 30 then
+                 for i, v in ipairs(displayData) do
+                    local x = pad + (i - 1) / math.max(#displayData - 1, 1) * usableW
+                    local y = pad + usableH - norm(v) * usableH
+                    
+                    local dot = Instance.new("Frame")
+                    dot.Size = UDim2.new(0, 4, 0, 4)
+                    dot.Position = UDim2.new(0, math.floor(x-2+0.5), 0, math.floor(y-2+0.5))
+                    dot.BackgroundColor3 = seriesMeta.color
+                    dot.BorderSizePixel = 0
+                    dot.ZIndex = 12
+                    dot.Parent = container
+                    Corner(2, dot)
                 end
             end
 
         elseif graphType == "bar" then
-            local sData = series[1].data
-            local n = #sData
-            if n == 0 then return end
-            
-            local gap = 3
-            local barW = math.max((usableW - gap * (n - 1)) / n, 3)
-            
-            for i, v in ipairs(sData) do
+             local n = #displayData
+             if n == 0 then return end
+             
+             local gap = 2
+             local barW = math.max((usableW - gap * (n - 1)) / n, 2)
+             
+             for i, v in ipairs(displayData) do
                 local x = pad + (i - 1) * (barW + gap)
                 local barH = norm(v) * usableH
-                local color = palette[((i - 1) % #palette) + 1]
                 
                 local bar = Instance.new("Frame")
                 bar.Size = UDim2.new(0, barW, 0, barH)
                 bar.Position = UDim2.new(0, math.floor(x+0.5), 1, -pad - math.floor(barH+0.5))
-                bar.BackgroundColor3 = color
+                bar.BackgroundColor3 = seriesMeta.color
                 bar.BorderSizePixel = 0
                 bar.ZIndex = 10
                 bar.Parent = container
-                
-                Corner(3, bar)
+                Corner(2, bar)
+             end
+        end
 
-                local hitbox = Instance.new("TextButton")
-                hitbox.Size = UDim2.new(0, barW, 0, barH)
-                hitbox.Position = UDim2.new(0, math.floor(x+0.5), 1, -pad - math.floor(barH+0.5))
-                hitbox.BackgroundTransparency = 1
-                hitbox.Text = ""
-                hitbox.ZIndex = 11
-                hitbox.Parent = container
-                
-                hitbox.MouseEnter:Connect(function()
-                    tooltipTitle.Text = "Item #" .. i
-                    tooltipValue.Text = string.format("%.2f", v)
-                    ttIndicator.BackgroundColor3 = color
-                    tooltipFrame.Visible = true
-                end)
-                hitbox.MouseLeave:Connect(function()
-                    tooltipFrame.Visible = false
-                end)
-            end
-
-        elseif graphType == "scatter" then
-             for si, s in ipairs(series) do
-                local color = palette[((si - 1) % #palette) + 1]
-                local d = s.data
-                for i, v in ipairs(d) do
-                    local x = pad + (i - 1) / math.max(#d - 1, 1) * usableW
-                    local y = pad + usableH - norm(v) * usableH
-                    createInteractiveDot(x, y, 6, color, s.name, i, v)
-                end
-            end
-
-        elseif graphType == "pie" then
-            -- Pie chart остается сложным, но мы уменьшим количество сегментов для производительности
-            local sData = series[1].data
-            local total = 0
-            for _, v in ipairs(sData) do total = total + math.max(tonumber(v) or 0, 0) end
-            if total <= 0 then return end
-
-            local size = math.min(w, h) - 24
-            local cx, cy = w / 2, h / 2
-            local radius = size / 2
-            local startAngle = -90
-
-            for i, v in ipairs(sData) do
-                v = math.max(tonumber(v) or 0, 0)
-                if v > 0 then
-                    local sweep = (v / total) * 360
-                    -- Уменьшаем детализацию: минимум 3 шага вместо 4
-                    local steps = math.max(math.ceil(sweep / 6), 3) 
-                    local color = palette[((i - 1) % #palette) + 1]
-
-                    for s = 0, steps - 1 do
-                        local a1 = startAngle + (s / steps) * sweep
-                        local a2 = startAngle + ((s + 1) / steps) * sweep
-                        local midA = (a1 + a2) / 2
-                        local rad = math.rad(midA)
-                        
-                        local wx = cx + math.cos(rad) * radius / 2
-                        local wy = cy + math.sin(rad) * radius / 2
-
-                        local wedge = Instance.new("Frame")
-                        wedge.Size = UDim2.new(0, radius, 0, math.max((sweep/steps)*3, 6))
-                        wedge.Position = UDim2.new(0, math.floor(wx - radius/2 + 0.5), 0, math.floor(wy - 3 + 0.5))
-                        wedge.AnchorPoint = Vector2.new(0, 0.5)
-                        wedge.BackgroundColor3 = color
-                        wedge.BorderSizePixel = 0
-                        wedge.Rotation = midA
-                        wedge.ZIndex = 10
-                        wedge.Parent = container
-                    end
-                end
-                startAngle = startAngle + sweep
-            end
+        -- Обновление позиции курсора, если он активен
+        if viewOffset then
+            local cursorX = pad + viewOffset * usableW
+            cursorLine.Position = UDim2.new(0, math.floor(cursorX + 0.5), 0, 0)
+            cursorLine.Visible = true
             
-            local inner = Instance.new("Frame")
-            inner.Size = UDim2.new(0, radius, 0, radius)
-            inner.Position = UDim2.new(0.5, -radius/2, 0.5, -radius/2)
-            inner.BackgroundColor3 = Theme.Tertiary
-            inner.BorderSizePixel = 0
-            inner.ZIndex = 15
-            inner.Parent = container
-            Corner(radius/2, inner)
-
-        elseif graphType == "radial" then
-            local sData = series[1].data
-            local n = #sData
-            if n == 0 then return end
+            -- Вычисление значения под курсором
+            local idx = math.floor(viewOffset * (#displayData - 1) + 0.5) + 1
+            idx = math.clamp(idx, 1, #displayData)
+            local val = displayData[idx]
             
-            local cx, cy = w / 2, h / 2
-            local maxR = math.min(cx, cy) - 12
-            if maxR < 5 then return end
-            
-            local angleStep = 360 / n
-            
-            -- Оси (тонкие линии)
-            for i = 1, n do
-                local spokeLen = maxR
-                local ang = math.rad((i - 1) * angleStep - 90)
-                local ex = cx + math.cos(ang) * spokeLen
-                local ey = cy + math.sin(ang) * spokeLen
-                drawOptimizedLine(cx, cy, ex, ey, Theme.SubText, 1, 5)
-            end
-            
-            -- Полигон данных
-            local points = {}
-            for i, v in ipairs(sData) do
-                local ang = math.rad((i - 1) * angleStep - 90)
-                local r = norm(v) * maxR
-                points[i] = {x = cx + math.cos(ang) * r, y = cy + math.sin(ang) * r, val = v, idx = i}
-            end
-            
-            for i = 1, n do
-                local j = (i % n) + 1
-                drawOptimizedLine(points[i].x, points[i].y, points[j].x, points[j].y, Theme.Accent, 2, 10)
-            end
-            
-            for _, p in ipairs(points) do
-                createInteractiveDot(p.x, p.y, 6, Theme.Accent, "Axis", p.idx, p.val)
-            end
+            statText.Text = string.format("T:%d | Val: %.2f | Min: %.2f | Max: %.2f", 
+                idx, val or 0, minValue, maxValue)
+            statsPanel.Visible = true
+        else
+            cursorLine.Visible = false
+            statsPanel.Visible = false
         end
     end
 
-    -- Управление перерисовкой
+    -- --- ОБРАБОТЧИКИ СОБЫТИЙ ---
+
+    -- 1. Dragging Scrubber Knob
+    local dragging = false
+    local startMouseX = 0
+    local startPos = 0
+
+    scrubberKnob.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            startMouseX = input.Position.X
+            startPos = scrubberKnob.Position.X.Scale
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position.X - startMouseX
+            local newScale = math.clamp(startPos + delta / scrubberBg.AbsoluteSize.X, 0, 1)
+            
+            scrubberKnob.Position = UDim2.new(newScale, 0, 0.5, 0)
+            scrubberFill.Size = UDim2.new(newScale, 0, 1, 0)
+            
+            viewOffset = newScale
+            requestRedraw()
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    -- 2. Click on Canvas to set cursor position manually
+    canvas.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            local relX = (input.Position.X - canvas.AbsolutePosition.X) / canvas.AbsoluteSize.X
+            viewOffset = math.clamp(relX, 0, 1)
+            
+            -- Синхронизируем ползунок
+            scrubberKnob.Position = UDim2.new(viewOffset, 0, 0.5, 0)
+            scrubberFill.Size = UDim2.new(viewOffset, 0, 1, 0)
+            
+            requestRedraw()
+        end
+    end)
+
+    -- 3. Double click to reset to Live mode
+    canvas.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+             -- Простая проверка двойного клика через время можно усложнить, 
+             -- но для начала добавим кнопку сброса или горячую клавишу.
+             -- Пока что: клик вне графика или повторный клик? 
+             -- Лучше добавить маленькую кнопку "LIVE" справа.
+        end
+    end)
+    
+    -- Кнопка LIVE (сброс курсора)
+    local liveBtn = Create("TextButton", {
+        Size = UDim2.new(0, 40, 0, 16),
+        Position = UDim2.new(1, -50, 0, 6),
+        BackgroundColor3 = Theme.Success,
+        BorderSizePixel = 0,
+        Font = Enum.Font.GothamBold,
+        Text = "LIVE",
+        TextColor3 = Theme.Text,
+        TextSize = 10,
+        Parent = frame
+    })
+    Corner(4, liveBtn)
+    liveBtn.MouseButton1Click:Connect(function()
+        viewOffset = nil
+        scrubberKnob.Position = UDim2.new(1, 0, 0.5, 0)
+        scrubberFill.Size = UDim2.new(1, 0, 1, 0)
+        requestRedraw()
+    end)
+
+
+    -- --- API МЕТОДЫ ---
+
     local function requestRedraw()
         needsRedraw = true
     end
@@ -2245,55 +2200,53 @@ function TabAPI:Graph(text, graphType, height)
         frame.BackgroundColor3 = Theme.Secondary
         st.Color = Theme.Accent
         titleLbl.TextColor3 = Theme.Text
-        canvas.BackgroundColor3 = Theme.Tertiary
-        for _, gl in ipairs(gridLines) do gl.BackgroundColor3 = Theme.Secondary end
+        canvas.BackgroundColor3 = Theme.Background
+        scrubberBg.BackgroundColor3 = Theme.Tertiary
+        scrubberKnob.BackgroundColor3 = Theme.Text
+        seriesMeta.color = palette[1] -- Сброс цвета при смене темы
+        
+        for _, gl in ipairs(gridLines) do gl.BackgroundColor3 = Theme.Tertiary end
         requestRedraw()
     end)
 
-    -- API Методы
     api.AddPoint = function(first, second)
         local v = first == api and second or first
         v = tonumber(v) or 0
-        table.insert(data, v)
-        if #data > maxPoints then table.remove(data, 1) end
+        
+        table.insert(dataBuffer, v)
+        
+        -- Ограничение истории
+        if #dataBuffer > maxHistory then
+            table.remove(dataBuffer, 1)
+        end
+        
         if autoRange then recalcAutoRange() end
+        
+        -- Если мы в режиме просмотра истории, не двигаемся автоматически
+        -- Если viewOffset == nil, то мы в LIVE режиме, обновляем сразу
+        if viewOffset == nil then
+             -- Автоматически сдвигаем ползунок вправо при добавлении новой точки в LIVE
+             -- Но так как мы храним фиксированное кол-во точек, индекс меняется.
+             -- Просто перерисуем.
+        end
+        
         requestRedraw()
         return api
     end
 
     api.SetData = function(first, second)
         local arr = first == api and second or first
-        data = {}
+        dataBuffer = {}
         if type(arr) == "table" then
-            for _, v in ipairs(arr) do table.insert(data, tonumber(v) or 0) end
+            for _, v in ipairs(arr) do 
+                table.insert(dataBuffer, tonumber(v) or 0) 
+            end
         end
-        series[1].data = data
         if autoRange then recalcAutoRange() end
         requestRedraw()
         return api
     end
-
-    api.AddSeries = function(nameOrArr, maybeArr)
-        local name, arr
-        if type(nameOrArr) == "string" then
-            name = nameOrArr
-            arr = maybeArr
-        else
-            name = "Series " .. (#series + 1)
-            arr = nameOrArr
-        end
-        
-        local ns = {}
-        if type(arr) == "table" then
-            for _, v in ipairs(arr) do table.insert(ns, tonumber(v) or 0) end
-        end
-        
-        table.insert(series, {name = name, data = ns})
-        if autoRange then recalcAutoRange() end
-        requestRedraw()
-        return api
-    end
-
+    
     api.SetRange = function(mn, mx)
         minValue = tonumber(mn) or 0
         maxValue = tonumber(mx) or 100
@@ -2312,7 +2265,6 @@ function TabAPI:Graph(text, graphType, height)
     
     api.Destroy = function()
         if renderConn then renderConn:Disconnect() end
-        if tooltipGui then tooltipGui:Destroy() end
         clearContainer()
         if frame.Parent then frame:Destroy() end
     end
