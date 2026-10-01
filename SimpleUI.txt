@@ -1830,7 +1830,6 @@ function TabAPI:Graph(text, graphType, height)
     }
 
     local needsRedraw = false
-    local autoRunning = false
     local api = {}
 
     -- Вспомогательные функции
@@ -1866,6 +1865,7 @@ function TabAPI:Graph(text, graphType, height)
     end
 
     -- 🖱️ СИСТЕМА TOOLTIP (Подсказки)
+    -- ВАЖНО: Здесь исправлен синтаксис Instance.new
     local tooltipGui = Instance.new("ScreenGui")
     tooltipGui.ResetOnSpawn = false
     tooltipGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -1880,7 +1880,7 @@ function TabAPI:Graph(text, graphType, height)
     tooltipFrame.ZIndex = 100
     tooltipFrame.Parent = tooltipGui
     
-    -- Исправление: Используем Corner/Stroke хелперы вместо прямого Instance.new с таблицей
+    -- Используем наши хелперы вместо прямых вызовов с таблицами
     Corner(6, tooltipFrame)
     Stroke(Theme.Accent, 1, 0.2, tooltipFrame)
 
@@ -1993,7 +1993,6 @@ function TabAPI:Graph(text, graphType, height)
         clearContainer()
         if #series == 0 then return end
 
-        -- Защита от нулевых размеров (частая причина краша AbsoluteContentSize)
         local w = canvas.AbsoluteSize.X
         local h = canvas.AbsoluteSize.Y
         
@@ -2217,10 +2216,9 @@ function TabAPI:Graph(text, graphType, height)
             return
         end
         if needsRedraw then
-            -- Дополнительная проверка перед вызовом redraw
             if canvas.AbsoluteSize.X >= 20 then
                 needsRedraw = false
-                pcall(redraw) -- Оборачиваем в pcall, чтобы одна ошибка не убивала весь цикл
+                pcall(redraw)
             end
         end
     end)
@@ -2299,7 +2297,6 @@ function TabAPI:Graph(text, graphType, height)
     end
     
     api.Destroy = function()
-        autoRunning = false
         if renderConn then renderConn:Disconnect() end
         if tooltipGui then tooltipGui:Destroy() end
         clearContainer()
