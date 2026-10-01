@@ -1806,7 +1806,7 @@ function TabAPI:Graph(text, graphType, height)
     })
     Corner(6, canvas)
 
-    -- Сетка (Grid Lines)
+    -- Сетка (Grid Lines) - статичные, создаем один раз
     local gridLines = {}
     for i = 1, 4 do
         local gl = Create("Frame", {
@@ -1886,7 +1886,6 @@ function TabAPI:Graph(text, graphType, height)
     end
 
     -- 🖱️ СИСТЕМА TOOLTIP (Подсказки)
-    -- ВАЖНО: Здесь исправлен синтаксис Instance.new
     local tooltipGui = Instance.new("ScreenGui")
     tooltipGui.ResetOnSpawn = false
     tooltipGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -1900,19 +1899,16 @@ function TabAPI:Graph(text, graphType, height)
     tooltipFrame.Active = true
     tooltipFrame.ZIndex = 100
     tooltipFrame.Parent = tooltipGui
-    
-    -- Используем наши хелперы вместо прямых вызовов с таблицами
     Corner(6, tooltipFrame)
     Stroke(Theme.Accent, 1, 0.2, tooltipFrame)
 
-    -- Элементы тултипа
     local ttIndicator = Instance.new("Frame")
     ttIndicator.Size = UDim2.new(0, 6, 0, 6)
     ttIndicator.Position = UDim2.new(0, 8, 0, 8)
     ttIndicator.BackgroundColor3 = Color3.new(1,1,1)
     ttIndicator.BorderSizePixel = 0
     ttIndicator.Parent = tooltipFrame
-    Corner(1, ttIndicator) -- Круглый индикатор
+    Corner(1, ttIndicator)
 
     local tooltipTitle = Instance.new("TextLabel")
     tooltipTitle.Size = UDim2.new(1, -20, 0, 16)
@@ -1939,17 +1935,44 @@ function TabAPI:Graph(text, graphType, height)
     UserInputService.InputChanged:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseMovement then
             if tooltipFrame.Visible then
-                local offset = Vector2.new(15, 15)
-                tooltipFrame.Position = UDim2.new(0, input.Position.X + offset.X, 0, input.Position.Y + offset.Y)
+                tooltipFrame.Position = UDim2.new(0, input.Position.X + 15, 0, input.Position.Y + 15)
             end
         end
     end)
+
+    -- ⚡ ОПТИМИЗИРОВАННАЯ ОТРИСОВКА ЛИНИИ
+    -- Используем один Frame с Rotation, но округляем координаты до целых чисел
+    -- Это устраняет "дрожание" субпиксельного рендера Roblox
+    local function drawOptimizedLine(x1, y1, x2, y2, color, thickness, zIndex)
+        -- Округляем координаты! Критически важно для стабильности
+        local ix1, iy1 = math.floor(x1 + 0.5), math.floor(y1 + 0.5)
+        local ix2, iy2 = math.floor(x2 + 0.5), math.floor(y2 + 0.5)
+
+        local dx = ix2 - ix1
+        local dy = iy2 - iy1
+        local len = math.sqrt(dx * dx + dy * dy)
+        
+        if len < 1 then return end
+        
+        local ang = math.deg(math.atan2(dy, dx))
+        
+        local seg = Instance.new("Frame")
+        seg.Size = UDim2.new(0, len, 0, thickness)
+        seg.Position = UDim2.new(0, ix1, 0, iy1)
+        seg.AnchorPoint = Vector2.new(0, 0.5)
+        seg.BackgroundColor3 = color
+        seg.BorderSizePixel = 0
+        seg.Rotation = ang
+        seg.ZIndex = zIndex or 10
+        seg.Parent = container
+    end
 
     -- Функция создания интерактивной точки с тултипом
     local function createInteractiveDot(x, y, size, color, seriesName, index, value)
         local dot = Instance.new("Frame")
         dot.Size = UDim2.new(0, size, 0, size)
-        dot.Position = UDim2.new(0, x - size/2, 0, y - size/2)
+        -- Также округляем позицию точки
+        dot.Position = UDim2.new(0, math.floor(x - size/2 + 0.5), 0, math.floor(y - size/2 + 0.5))
         dot.BackgroundColor3 = color
         dot.BorderSizePixel = 0
         dot.ZIndex = 12
@@ -1957,10 +1980,9 @@ function TabAPI:Graph(text, graphType, height)
         
         Corner(size/2, dot)
 
-        -- Hitbox для мыши
         local hitbox = Instance.new("TextButton")
         hitbox.Size = UDim2.new(0, size + 8, 0, size + 8)
-        hitbox.Position = UDim2.new(0, x - (size+8)/2, 0, y - (size+8)/2)
+        hitbox.Position = UDim2.new(0, math.floor(x - (size+8)/2 + 0.5), 0, math.floor(y - (size+8)/2 + 0.5))
         hitbox.BackgroundTransparency = 1
         hitbox.Text = ""
         hitbox.ZIndex = 13
@@ -1980,36 +2002,6 @@ function TabAPI:Graph(text, graphType, height)
         return dot
     end
 
-    -- 🔥 ГЛАВНОЕ ИСПРАВЛЕНИЕ: РИСОВАНИЕ ЛИНИЙ БЕЗ ROTATION
-    local function drawStableLine(x1, y1, x2, y2, color, thickness, zIndex)
-        local dx = x2 - x1
-        local dy = y2 - y1
-        local dist = math.sqrt(dx*dx + dy*dy)
-        
-        if dist < 1 then return end
-        
-        local steps = math.min(math.floor(dist / 2), 50) 
-        if steps < 1 then steps = 1 end
-        
-        local stepX = dx / steps
-        local stepY = dy / steps
-        
-        for i = 0, steps do
-            local px = x1 + stepX * i
-            local py = y1 + stepY * i
-            
-            local seg = Instance.new("Frame")
-            seg.Size = UDim2.new(0, thickness, 0, thickness)
-            seg.Position = UDim2.new(0, px - thickness/2, 0, py - thickness/2)
-            seg.BackgroundColor3 = color
-            seg.BorderSizePixel = 0
-            seg.ZIndex = zIndex or 10
-            seg.Parent = container
-            
-            Corner(thickness/2, seg) -- Делаем их круглыми
-        end
-    end
-
     local function redraw()
         clearContainer()
         if #series == 0 then return end
@@ -2025,10 +2017,9 @@ function TabAPI:Graph(text, graphType, height)
         local usableH = h - pad * 2
         if usableW < 10 or usableH < 10 then return end
 
-        -- Логика для разных типов
         if graphType == "line" or graphType == "area" or graphType == "stacked" then
             
-            -- Рисуем области (для Area) сначала
+            -- Area Fill (упрощенный: только прямоугольники под линией, без сложных полигонов для скорости)
             if graphType == "area" then
                 for si, s in ipairs(series) do
                     local color = palette[((si - 1) % #palette) + 1]
@@ -2041,7 +2032,7 @@ function TabAPI:Graph(text, graphType, height)
                             
                             local rect = Instance.new("Frame")
                             rect.Size = UDim2.new(0, usableW/(#d-1)+1, 0, math.abs(y2-y1))
-                            rect.Position = UDim2.new(0, x, 0, math.min(y1,y2))
+                            rect.Position = UDim2.new(0, math.floor(x+0.5), 0, math.floor(math.min(y1,y2)+0.5))
                             rect.BackgroundColor3 = color
                             rect.BackgroundTransparency = 0.6
                             rect.BorderSizePixel = 0
@@ -2052,33 +2043,34 @@ function TabAPI:Graph(text, graphType, height)
                 end
             end
 
-            -- Рисуем линии
+            -- Lines & Dots
             for si, s in ipairs(series) do
                 local color = palette[((si - 1) % #palette) + 1]
                 local d = s.data
                 
                 if #d >= 2 then
+                    -- Рисуем линии одним проходом
                     for i = 1, #d - 1 do
                         local x1 = pad + (i - 1) / (#d - 1) * usableW
                         local x2 = pad + i / (#d - 1) * usableW
                         local y1 = pad + usableH - norm(d[i]) * usableH
                         local y2 = pad + usableH - norm(d[i+1]) * usableH
                         
-                        drawStableLine(x1, y1, x2, y2, color, 3, 10)
+                        drawOptimizedLine(x1, y1, x2, y2, color, 2, 10)
                     end
                     
-                    -- Точки данных с тултипами
+                    -- Точки (только если это Line/Area, для Stacked часто скрывают)
                     if graphType ~= "stacked" then
                          for i, v in ipairs(d) do
                             local x = pad + (i - 1) / math.max(#d - 1, 1) * usableW
                             local y = pad + usableH - norm(v) * usableH
-                            createInteractiveDot(x, y, 6, color, s.name, i, v)
+                            createInteractiveDot(x, y, 5, color, s.name, i, v)
                         end
                     end
                 elseif #d == 1 then
                      local x = pad + usableW / 2
                      local y = pad + usableH - norm(d[1]) * usableH
-                     createInteractiveDot(x, y, 6, color, s.name, 1, d[1])
+                     createInteractiveDot(x, y, 5, color, s.name, 1, d[1])
                 end
             end
 
@@ -2097,7 +2089,7 @@ function TabAPI:Graph(text, graphType, height)
                 
                 local bar = Instance.new("Frame")
                 bar.Size = UDim2.new(0, barW, 0, barH)
-                bar.Position = UDim2.new(0, x, 1, -pad - barH)
+                bar.Position = UDim2.new(0, math.floor(x+0.5), 1, -pad - math.floor(barH+0.5))
                 bar.BackgroundColor3 = color
                 bar.BorderSizePixel = 0
                 bar.ZIndex = 10
@@ -2105,10 +2097,9 @@ function TabAPI:Graph(text, graphType, height)
                 
                 Corner(3, bar)
 
-                -- Тултип для бара
                 local hitbox = Instance.new("TextButton")
                 hitbox.Size = UDim2.new(0, barW, 0, barH)
-                hitbox.Position = UDim2.new(0, x, 1, -pad - barH)
+                hitbox.Position = UDim2.new(0, math.floor(x+0.5), 1, -pad - math.floor(barH+0.5))
                 hitbox.BackgroundTransparency = 1
                 hitbox.Text = ""
                 hitbox.ZIndex = 11
@@ -2132,11 +2123,12 @@ function TabAPI:Graph(text, graphType, height)
                 for i, v in ipairs(d) do
                     local x = pad + (i - 1) / math.max(#d - 1, 1) * usableW
                     local y = pad + usableH - norm(v) * usableH
-                    createInteractiveDot(x, y, 8, color, s.name, i, v)
+                    createInteractiveDot(x, y, 6, color, s.name, i, v)
                 end
             end
 
         elseif graphType == "pie" then
+            -- Pie chart остается сложным, но мы уменьшим количество сегментов для производительности
             local sData = series[1].data
             local total = 0
             for _, v in ipairs(sData) do total = total + math.max(tonumber(v) or 0, 0) end
@@ -2151,7 +2143,8 @@ function TabAPI:Graph(text, graphType, height)
                 v = math.max(tonumber(v) or 0, 0)
                 if v > 0 then
                     local sweep = (v / total) * 360
-                    local steps = math.max(math.ceil(sweep / 4), 4)
+                    -- Уменьшаем детализацию: минимум 3 шага вместо 4
+                    local steps = math.max(math.ceil(sweep / 6), 3) 
                     local color = palette[((i - 1) % #palette) + 1]
 
                     for s = 0, steps - 1 do
@@ -2165,7 +2158,7 @@ function TabAPI:Graph(text, graphType, height)
 
                         local wedge = Instance.new("Frame")
                         wedge.Size = UDim2.new(0, radius, 0, math.max((sweep/steps)*3, 6))
-                        wedge.Position = UDim2.new(0, wx - radius/2, 0, wy - 3)
+                        wedge.Position = UDim2.new(0, math.floor(wx - radius/2 + 0.5), 0, math.floor(wy - 3 + 0.5))
                         wedge.AnchorPoint = Vector2.new(0, 0.5)
                         wedge.BackgroundColor3 = color
                         wedge.BorderSizePixel = 0
@@ -2197,13 +2190,13 @@ function TabAPI:Graph(text, graphType, height)
             
             local angleStep = 360 / n
             
-            -- Оси
+            -- Оси (тонкие линии)
             for i = 1, n do
                 local spokeLen = maxR
                 local ang = math.rad((i - 1) * angleStep - 90)
                 local ex = cx + math.cos(ang) * spokeLen
                 local ey = cy + math.sin(ang) * spokeLen
-                drawStableLine(cx, cy, ex, ey, Theme.SubText, 1, 5)
+                drawOptimizedLine(cx, cy, ex, ey, Theme.SubText, 1, 5)
             end
             
             -- Полигон данных
@@ -2216,11 +2209,11 @@ function TabAPI:Graph(text, graphType, height)
             
             for i = 1, n do
                 local j = (i % n) + 1
-                drawStableLine(points[i].x, points[i].y, points[j].x, points[j].y, Theme.Accent, 2, 10)
+                drawOptimizedLine(points[i].x, points[i].y, points[j].x, points[j].y, Theme.Accent, 2, 10)
             end
             
             for _, p in ipairs(points) do
-                createInteractiveDot(p.x, p.y, 7, Theme.Accent, "Axis", p.idx, p.val)
+                createInteractiveDot(p.x, p.y, 6, Theme.Accent, "Axis", p.idx, p.val)
             end
         end
     end
