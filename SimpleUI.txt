@@ -1872,15 +1872,17 @@ function TabAPI:Graph(text, graphType, height)
     tooltipGui.Parent = (gethui and gethui()) or CoreGui
 
     local tooltipFrame = Instance.new("Frame")
-    tooltipFrame.Size = UDim2.new(0, 140, 0, 50) -- Чуть больше места
+    tooltipFrame.Size = UDim2.new(0, 140, 0, 50)
     tooltipFrame.BackgroundColor3 = Theme.Background
     tooltipFrame.BorderSizePixel = 0
     tooltipFrame.Visible = false
     tooltipFrame.Active = true
     tooltipFrame.ZIndex = 100
     tooltipFrame.Parent = tooltipGui
-    Instance.new("UICorner", {CornerRadius = UDim.new(0, 6), Parent = tooltipFrame})
-    Instance.new("UIStroke", {Color = Theme.Accent, Thickness = 1, Transparency = 0.2, Parent = tooltipFrame})
+    
+    -- Исправление: Используем Corner/Stroke хелперы вместо прямого Instance.new с таблицей
+    Corner(6, tooltipFrame)
+    Stroke(Theme.Accent, 1, 0.2, tooltipFrame)
 
     -- Элементы тултипа
     local ttIndicator = Instance.new("Frame")
@@ -1889,7 +1891,7 @@ function TabAPI:Graph(text, graphType, height)
     ttIndicator.BackgroundColor3 = Color3.new(1,1,1)
     ttIndicator.BorderSizePixel = 0
     ttIndicator.Parent = tooltipFrame
-    Instance.new("UICorner", {CornerRadius = UDim.new(1, 0), Parent = ttIndicator})
+    Corner(1, ttIndicator) -- Круглый индикатор
 
     local tooltipTitle = Instance.new("TextLabel")
     tooltipTitle.Size = UDim2.new(1, -20, 0, 16)
@@ -1916,7 +1918,6 @@ function TabAPI:Graph(text, graphType, height)
     UserInputService.InputChanged:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseMovement then
             if tooltipFrame.Visible then
-                -- Смещение курсора, чтобы не перекрывать точку
                 local offset = Vector2.new(15, 15)
                 tooltipFrame.Position = UDim2.new(0, input.Position.X + offset.X, 0, input.Position.Y + offset.Y)
             end
@@ -1933,11 +1934,9 @@ function TabAPI:Graph(text, graphType, height)
         dot.ZIndex = 12
         dot.Parent = container
         
-        local c = Instance.new("UICorner")
-        c.CornerRadius = UDim.new(0, size/2)
-        c.Parent = dot
+        Corner(size/2, dot)
 
-        -- Hitbox для мыши (чуть больше видимой точки)
+        -- Hitbox для мыши
         local hitbox = Instance.new("TextButton")
         hitbox.Size = UDim2.new(0, size + 8, 0, size + 8)
         hitbox.Position = UDim2.new(0, x - (size+8)/2, 0, y - (size+8)/2)
@@ -1961,7 +1960,6 @@ function TabAPI:Graph(text, graphType, height)
     end
 
     -- 🔥 ГЛАВНОЕ ИСПРАВЛЕНИЕ: РИСОВАНИЕ ЛИНИЙ БЕЗ ROTATION
-    -- Мы рисуем линию как серию маленьких точек вдоль пути
     local function drawStableLine(x1, y1, x2, y2, color, thickness, zIndex)
         local dx = x2 - x1
         local dy = y2 - y1
@@ -1969,8 +1967,6 @@ function TabAPI:Graph(text, graphType, height)
         
         if dist < 1 then return end
         
-        -- Количество шагов зависит от длины (чем длиннее, тем чаще ставим точки)
-        -- Но ограничиваем сверху, чтобы не лагало
         local steps = math.min(math.floor(dist / 2), 50) 
         if steps < 1 then steps = 1 end
         
@@ -1989,10 +1985,7 @@ function TabAPI:Graph(text, graphType, height)
             seg.ZIndex = zIndex or 10
             seg.Parent = container
             
-            -- Делаем их круглыми, чтобы сливались в гладкую линию
-            local corner = Instance.new("UICorner")
-            corner.CornerRadius = UDim.new(1, 0)
-            corner.Parent = seg
+            Corner(thickness/2, seg) -- Делаем их круглыми
         end
     end
 
@@ -2000,8 +1993,11 @@ function TabAPI:Graph(text, graphType, height)
         clearContainer()
         if #series == 0 then return end
 
+        -- Защита от нулевых размеров (частая причина краша AbsoluteContentSize)
         local w = canvas.AbsoluteSize.X
         local h = canvas.AbsoluteSize.Y
+        
+        if w <= 0 or h <= 0 then return end
         if w < 20 or h < 20 then return end
 
         local pad = 12
@@ -2023,7 +2019,6 @@ function TabAPI:Graph(text, graphType, height)
                             local y1 = pad + usableH - norm(d[i]) * usableH
                             local y2 = pad + usableH - norm(d[i+1]) * usableH
                             
-                            -- Прямоугольник под линией
                             local rect = Instance.new("Frame")
                             rect.Size = UDim2.new(0, usableW/(#d-1)+1, 0, math.abs(y2-y1))
                             rect.Position = UDim2.new(0, x, 0, math.min(y1,y2))
@@ -2049,7 +2044,6 @@ function TabAPI:Graph(text, graphType, height)
                         local y1 = pad + usableH - norm(d[i]) * usableH
                         local y2 = pad + usableH - norm(d[i+1]) * usableH
                         
-                        -- Используем новый метод рисования
                         drawStableLine(x1, y1, x2, y2, color, 3, 10)
                     end
                     
@@ -2089,9 +2083,7 @@ function TabAPI:Graph(text, graphType, height)
                 bar.ZIndex = 10
                 bar.Parent = container
                 
-                local c = Instance.new("UICorner")
-                c.CornerRadius = UDim.new(0, 3)
-                c.Parent = bar
+                Corner(3, bar)
 
                 -- Тултип для бара
                 local hitbox = Instance.new("TextButton")
@@ -2125,9 +2117,6 @@ function TabAPI:Graph(text, graphType, height)
             end
 
         elseif graphType == "pie" then
-            -- Pie chart тоже лучше делать через сектора, но здесь оставим простую реализацию
-            -- Для идеальной геометрии Pie нужен CanvasGroup или SVG, но в рамках Frame это сложно.
-            -- Оставим текущую логику, она обычно работает нормально, так как нет резких углов линий.
             local sData = series[1].data
             local total = 0
             for _, v in ipairs(sData) do total = total + math.max(tonumber(v) or 0, 0) end
@@ -2175,7 +2164,7 @@ function TabAPI:Graph(text, graphType, height)
             inner.BorderSizePixel = 0
             inner.ZIndex = 15
             inner.Parent = container
-            Instance.new("UICorner", {CornerRadius = UDim.new(0, radius/2), Parent = inner})
+            Corner(radius/2, inner)
 
         elseif graphType == "radial" then
             local sData = series[1].data
@@ -2188,7 +2177,7 @@ function TabAPI:Graph(text, graphType, height)
             
             local angleStep = 360 / n
             
-            -- Оси (тонкие линии)
+            -- Оси
             for i = 1, n do
                 local spokeLen = maxR
                 local ang = math.rad((i - 1) * angleStep - 90)
@@ -2207,7 +2196,6 @@ function TabAPI:Graph(text, graphType, height)
             
             for i = 1, n do
                 local j = (i % n) + 1
-                -- Рисуем стороны полигона стабильными точками
                 drawStableLine(points[i].x, points[i].y, points[j].x, points[j].y, Theme.Accent, 2, 10)
             end
             
@@ -2229,9 +2217,10 @@ function TabAPI:Graph(text, graphType, height)
             return
         end
         if needsRedraw then
+            -- Дополнительная проверка перед вызовом redraw
             if canvas.AbsoluteSize.X >= 20 then
                 needsRedraw = false
-                redraw()
+                pcall(redraw) -- Оборачиваем в pcall, чтобы одна ошибка не убивала весь цикл
             end
         end
     end)
