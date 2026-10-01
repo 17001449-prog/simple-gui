@@ -1731,9 +1731,6 @@ function BeautifulUI:CreateWindow(config)
             end
             return SubAPI
         end
-
-        return TabAPI 
-    end
 function TabAPI:Graph(text, graphType, height)
     -- Нормализация типов
     local function normalizeGraphType(t)
@@ -2323,6 +2320,7 @@ function TabAPI:Graph(text, graphType, height)
     task.defer(requestRedraw)
     return api
 end
+        return TabAPI 
     end
 
     function Window:Notify(t, txt, dur, tp, btns) BeautifulUI:Notify(t, txt, dur, tp, btns) end
