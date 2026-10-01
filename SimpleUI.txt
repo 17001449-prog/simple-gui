@@ -1733,30 +1733,6 @@ function BeautifulUI:CreateWindow(config)
         end
 
         return TabAPI
-    end
-
-    function Window:Notify(t, txt, dur, tp, btns) BeautifulUI:Notify(t, txt, dur, tp, btns) end
-    function Window:DialogBox(cfg) return BeautifulUI:DialogBox(cfg) end
-
-    local visible = true
-    UserInputService.InputBegan:Connect(function(input, gpe)
-        if gpe then return end
-        if input.KeyCode == toggleKey then
-            visible = not visible
-            if not visible then
-                Tween(main, 0.25, {Size = UDim2.new(0, 0, 0, 0), Position = UDim2.new(0.5, 0, 0.5, 0)})
-                task.wait(0.26); main.Visible = false; ShowIcon()
-            else
-                HideIcon(); task.wait(0.05); main.Visible = true
-                main.Position = UDim2.new(0.5, -size.X.Offset/2, 0.5, -size.Y.Offset/2)
-                Tween(main, 0.3, {Size = size})
-            end
-        end
-    end)
-
-    return Window
-end
-
 function TabAPI:Graph(text, graphType, height)
     -- Нормализация типов
     local function normalizeGraphType(t)
@@ -2345,6 +2321,29 @@ function TabAPI:Graph(text, graphType, height)
 
     task.defer(requestRedraw)
     return api
+end
+    end
+
+    function Window:Notify(t, txt, dur, tp, btns) BeautifulUI:Notify(t, txt, dur, tp, btns) end
+    function Window:DialogBox(cfg) return BeautifulUI:DialogBox(cfg) end
+
+    local visible = true
+    UserInputService.InputBegan:Connect(function(input, gpe)
+        if gpe then return end
+        if input.KeyCode == toggleKey then
+            visible = not visible
+            if not visible then
+                Tween(main, 0.25, {Size = UDim2.new(0, 0, 0, 0), Position = UDim2.new(0.5, 0, 0.5, 0)})
+                task.wait(0.26); main.Visible = false; ShowIcon()
+            else
+                HideIcon(); task.wait(0.05); main.Visible = true
+                main.Position = UDim2.new(0.5, -size.X.Offset/2, 0.5, -size.Y.Offset/2)
+                Tween(main, 0.3, {Size = size})
+            end
+        end
+    end)
+
+    return Window
 end
 -- А сам метод объяви ДО Window:Tab как TabAPI:Graph
 -- 
