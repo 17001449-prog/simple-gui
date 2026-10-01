@@ -2343,5 +2343,6 @@ end
     end)
 
     return Window
+end
 
 return BeautifulUI
