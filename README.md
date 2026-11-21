@@ -131,6 +131,42 @@ table.insert(BeautifulUI.DebugUsers, "МойНик")
 BeautifulUI.BuiltInDebug = "МойНик"  -- по умолчанию пусто
 ```
 
+## Совместимость с Rayfield
+
+В репозитории есть `RayfieldCompat.lua` — слой, который превращает BeautifulUI
+в замену Rayfield с сохранением знакомого API:
+
+```lua
+_G.BeautifulUI = loadstring(game:HttpGet("URL/SimpleUI.txt"))()
+local Rayfield  = loadstring(game:HttpGet("URL/RayfieldCompat.lua"))()
+
+local Window = Rayfield:CreateWindow({Name = "My Hub", KeySystem = false})
+local Tab = Window:CreateTab("Main", 4483362458)  -- иконка эмодзи или asset id
+
+Tab:CreateButton({Name = "Click", Callback = function() end})
+Tab:CreateToggle({Name = "God", CurrentValue = true, Flag = "GodMode", Callback = function(v) end})
+Tab:CreateSlider({Name = "Speed", Range = {16, 100}, Increment = 4, Suffix = "studs/s"})
+Tab:CreateDropdown({Name = "Tool", Options = {"Sword","Bow"}, CurrentOption = "Sword"})
+Tab:CreateDropdown({Name = "Multi", Options = {"A","B"}, MultipleOptions = true})
+Tab:CreateKeybind({Name = "Bind", CurrentKeybind = "Q"})
+Tab:CreateInput({Name = "Amount", NumbersOnly = true, CharacterLimit = 4})
+Tab:CreateColorPicker({Name = "Color", Color = Color3.fromRGB(255,0,0)})
+Tab:CreateSection("Раздел")
+Tab:CreateParagraph({Title = "Важно", Content = "Текст"})
+Rayfield:Notify({Title = "Загружено", Content = "Ок", Duration = 3})
+```
+
+Все элементы отдают `:Set()` / `:Get()` как в Rayfield.
+
+**Что действительно поддержано:** окно, вкладки, секции, кнопки, тумблеры,
+слайдеры (шаг/суффикс), дропдауны (включая мультивыбор), кейбинды, инпуты,
+колорпикеры, абзацы/лейблы, уведомления (с `Actions`), `Rayfield:Destroy()`.
+
+**Чего нет — честно:** `KeySystem` и `Discord` не воспроизводятся (окно открывается
+сразу, Discord-кнопки нет), загрузочный экран (`LoadingTitle/Subtitle`) пропускается,
+`Theme`-таблица маппится на ближайшую встроенную тему, а `ConfigurationSaving`
+сохраняет один файл (`RayfieldCompat.json` / ваше имя), без множественных профилей.
+
 ## Что важно понять про v6
 
 - Все хоткеи игнорируются, пока фокус в любом `TextBox` (поиск, ввод и т. д.).
