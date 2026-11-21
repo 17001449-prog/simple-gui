@@ -76,11 +76,13 @@ _G.LibraryLoadTime = tick()
 -- а заполняются они в секциях цветов и тем.
 local Theme = {}
 local C
+local FontConfig -- forward-declaration: конфиг кастомного шрифта (см. секцию CUSTOM FONT)
+local applyFontTo -- forward-declaration: применить шрифт к одному объекту
 
 BeautifulUI.DebugUsers = {}
 BeautifulUI.BuiltInDebug = ""
 BeautifulUI.IsMobile = IsMobile
-BeautifulUI.Version = "6.2"
+BeautifulUI.Version = "6.3"
 
 -- ═══════════════════════════════════════════════
 -- 🔍 SEARCH INDEX (для поиска по элементам вкладок)
@@ -95,9 +97,41 @@ end
 -- ═══════════════════════════════════════════════
 -- 🧩 УТИЛИТЫ (создание UI)
 -- ═══════════════════════════════════════════════
+-- 🅰️ Созданные объекты с шрифтом запоминаем: так потом можно применить свой шрифт
+-- ко всему интерфейсу разом (включая элементы, созданные до смены шрифта).
+local FontRegistry = {}
+local HasFontFace = nil -- определяется один раз (FontFace существует не во всех средах)
+
 local function Create(className, props)
+    props = props or {}
     local inst = Instance.new(className)
-    for k, v in pairs(props or {}) do inst[k] = v end
+    -- если свой шрифт уже активен, новый элемент сразу создаём через FontFace,
+    -- иначе Roblox при присваивании Font сбросит наш FontFace
+    local wantFace = (props.FontFace ~= nil) or (FontConfig.Active and not props.Font)
+    for k, v in pairs(props) do
+        if k ~= "FontFace" then inst[k] = v end
+    end
+    if wantFace then
+        if HasFontFace == nil then
+            HasFontFace = pcall(function() local t = Instance.new("TextLabel"); t.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json") end)
+        end
+        if HasFontFace then inst.FontFace = props.FontFace end
+    end
+    if inst:IsA("TextLabel") or inst:IsA("TextButton") or inst:IsA("TextBox") then
+        -- снимок состояния ДО применения своего шрифта
+        local fontName = inst.Font and tostring(inst.Font.Name) or ""
+        FontRegistry[inst] = {
+            original = inst.Font,
+            baseSize = inst.TextSize,
+            bold = fontName:find("Bold") ~= nil or fontName:find("Black") ~= nil or fontName:find("Semibold") ~= nil or fontName:find("SemiBold") ~= nil,
+            mono = fontName == "Code",
+        }
+        -- шрифт уже выбран → новый элемент получает его сразу, а не после
+        -- следующего SetCustomFont (иначе свежие элементы остаются старыми)
+        if FontConfig.Active and applyFontTo then
+            pcall(applyFontTo, inst)
+        end
+    end
     return inst
 end
 
@@ -502,10 +536,215 @@ local function ApplyTheme(t)
     for k, v in pairs(t) do Theme[k] = C(v) end
 end
 ApplyTheme(Themes.Purple)
+-- ═══════════════════════════════════════════════════════════════
+-- 🅰️ CUSTOM FONT — свой шрифт для всего интерфейса
+-- ═══════════════════════════════════════════════════════════════
+-- Можно указать: имя Enum.Font (GothamBlack), ИД шрифта из
+-- create.roblox.com/marketplace/fonts (например 12187365375) или строку
+-- "rbxasset://fonts/families/GothamSSm.json".
+FontConfig = {
+    Family = nil,      -- Font / FontFace / имя Enum.Font / asset id
+    Weight = nil,      -- Enum.FontWeight.Bold и т.п.
+    Style = nil,       -- Enum.FontStyle.Italic
+    Bold = nil,        -- true → GothamBold-аналог, false → обычный
+    SizeScale = 1,     -- 1.1 = все тексты крупнее на 10%
+    LineHeight = nil,  -- межстрочный интервал (для Paragraph/Input)
+    Monospace = false, -- TrueType-хаки: не трогать "моно" надписи
+    FamilyName = nil,  -- последнее применённое имя (для FontPicker)
+    Active = false,    -- свой шрифт включён (новые элементы сразу через FontFace)
+    Applied = nil,
+}
+
+local FONT_ALIASES = {
+    Bold = "GothamBold", Black = "GothamBlack", Medium = "GothamMedium",
+    SemiBold = "GothamSemibold", Semi = "GothamSemibold", Light = "GothamLight",
+    Regular = "Gotham", Normal = "Gotham", Default = "Gotham",
+    Code = "Code", Mono = "Code", MonoSpace = "Code",
+}
+
+local function isFontLike(v)
+    if v == nil or type(v) == "boolean" then return false end
+    local t = typeof(v)
+    if t == "EnumItem" then return true end
+    if t == "Font" or t == "FontFace" then return true end
+    if type(v) == "string" then return true end
+    if type(v) == "number" then return true end
+    return false
+end
+
+-- Строка → {EnumFont = ..., Face = ...}; принимает имя, алиас, ассет-ID, json-путь
+local function parseFontSpec(v)
+    if type(v) == "number" then v = tostring(math.floor(v)) end
+    if typeof(v) == "EnumItem" then
+        local n = v.Name
+        local e = Enum.Font[n]
+        if e then return { EnumFont = e, Name = n } end
+        return { EnumFont = v, Name = n }
+    end
+    if typeof(v) == "Font" or typeof(v) == "FontFace" then
+        return { Face = Font.new(v, FontWeight and FontWeight.Regular or nil), Name = "custom" }
+    end
+    if type(v) ~= "string" then return nil end
+    local s = v:gsub("^%s+", ""):gsub("%s+$", "")
+    if s == "" then return nil end
+    local alias = FONT_ALIASES[s] or FONT_ALIASES[s:sub(1, 1):upper() .. s:sub(2)]
+    if alias then s = alias end
+    local e = Enum.Font[s]
+    if e and type(e) == "table" and e.Name == s then return { EnumFont = e, Name = s } end
+    e = nil
+    if s:match("^%d+$") then
+        return { AssetId = s, Name = "font:" .. s }
+    end
+    if s:find("rbxasset", 1, true) then
+        return { JsonPath = s, Name = "json:" .. s }
+    end
+    return nil
+end
+
+-- Создаёт Roblox FontFace из спецификации (уважает Weight/Style токена)
+local function buildFontFace(spec, boldish)
+    if not spec then return nil end
+    if spec.Face then return spec.Face end
+    local ok, face = pcall(function()
+        local base
+        local raw = spec.Face or spec.EnumFont or spec.JsonPath or (spec.AssetId and spec.AssetId)
+        if spec.JsonPath then
+            base = Font.new(spec.JsonPath)
+        elseif spec.AssetId then
+            base = Font.fromId(tonumber(spec.AssetId))
+        elseif spec.EnumFont then
+            -- Enum.Font → Font через fromEnum, иначе через имя json-файла
+            local okEnum
+            okEnum, base = pcall(function() return Font.fromEnum(spec.EnumFont) end)
+            if not okEnum or not base then
+                base = Font.new("rbxasset://fonts/families/GothamSSm.json")
+            end
+        else
+            base = Font.new("rbxasset://fonts/families/GothamSSm.json")
+        end
+        local weight = FontConfig.Weight
+        if not weight then
+            local b = boldish
+            if b == nil then b = FontConfig.Bold end
+            if b == nil then
+                if FontConfig.Applied then
+                    -- сохраняем «жирность» исходного шрифта, когда свой не задан
+                    b = FontConfig.Record and FontConfig.Record.bold
+                end
+            end
+            weight = (b == true) and Enum.FontWeight.Bold or Enum.FontWeight.Regular
+        end
+        local f = Font.new(base, weight, FontConfig.Style or Enum.FontStyle.Normal)
+        return f
+    end)
+    if ok then return face end
+    return nil
+end
+
+local function fontSupportsFace()
+    if HasFontFace ~= nil then return HasFontFace end
+    HasFontFace = pcall(function()
+        local l = Instance.new("TextLabel")
+        l.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json")
+        -- клиент молча игнорирует свойство — значит FontFace не поддержан
+        assert(l.FontFace ~= nil, "FontFace not supported")
+    end)
+    return HasFontFace
+end
+
+local function scaled(size)
+    local s = tonumber(FontConfig.SizeScale) or 1
+    if s == 1 then return size end
+    return math.max(7, math.floor((tonumber(size) or 14) * s + 0.5))
+end
+
+-- Имя Enum.Font «похожее» на исходный текст (для fallback-режима)
+local function enumForBold(bold)
+    local spec = FontConfig.Spec
+    if spec and spec.EnumFont then
+        if not bold then return spec.EnumFont end
+        local n = tostring(spec.EnumFont.Name or "")
+        local e = Enum.Font[n .. "Bold"] or Enum.Font[n]
+        if e then return e end
+        return spec.EnumFont
+    end
+    return bold and Enum.Font.GothamBold or Enum.Font.Gotham
+end
+
+-- Запись снимка (если объект зарегистрирован до появления снимка)
+local function noteRecord(obj)
+    local rec = FontRegistry[obj]
+    if rec == true or rec == nil then
+        local f = obj.Font
+        local n = f and tostring(f.Name or "") or ""
+        rec = {
+            original = f,
+            baseSize = obj.TextSize,
+            bold = n:find("Bold") ~= nil or n:find("Black") ~= nil or n:find("Semibold") ~= nil or n:find("SemiBold") ~= nil,
+            mono = n == "Code",
+        }
+        FontRegistry[obj] = rec
+    end
+    return rec
+end
+
+-- Применить шрифт к одному объекту
+applyFontTo = function(obj, boldish)
+    if not obj or not obj.Parent then return false end
+    local rec = noteRecord(obj)
+    if rec.mono and FontConfig.Monospace then return false end
+    local size = obj.TextSize
+    if rec.baseSize == nil then rec.baseSize = size end
+
+    -- размер с учётом масштаба
+    obj.TextSize = scaled(rec.baseSize)
+    if FontConfig.LineHeight and (obj.LineHeight ~= nil) then
+        pcall(function() obj.LineHeight = FontConfig.LineHeight end)
+    end
+
+    if fontSupportsFace() then
+        local face = buildFontFace(FontConfig.Spec, boldish ~= nil and boldish or rec.bold)
+        if face then
+            pcall(function() obj.FontFace = face end)
+            return true
+        end
+    end
+    -- Fallback (TrueType / старые клиенты / мобилки без FontFace)
+    local ok, err = pcall(function() obj.Font = enumForBold(boldish) end)
+    if not ok and obj.Font then obj.Font = Enum.Font.Gotham end
+    return ok
+end
+
+-- Все зарегистрированные тексты, которые сейчас существуют в игре.
+-- Не полагаемся на IsDescendantOf/GetDescendants — работаем по реестру,
+-- поэтому закрытые (невидимые) окна тоже получают шрифт.
+local function eachTrackedText(callback)
+    local n = 0
+    for obj in pairs(FontRegistry) do
+        if obj.Parent then
+            if callback(obj) then n = n + 1 end
+        end
+    end
+    return n
+end
+
+-- Применить шрифт ко всем известным текстам (включая закрытые окна)
+local function restoreWindowFonts(win, boldish)
+    if not win then return 0 end
+    return eachTrackedText(function(obj) return applyFontTo(obj, boldish) end)
+end
+
 
 BeautifulUI.Themes = Themes
 BeautifulUI.Theme = Theme
 BeautifulUI.CurrentThemeName = "Purple"
+-- 🅰️ Отметить объект как «моноширинный», чтобы CustomFont его не ломал
+function BeautifulUI:MarkMonospace(obj)
+    local rec = noteRecord(obj)
+    rec.mono = true
+    return obj
+end
+
 
 local OpenWindows = {}
 local function ReapplyThemeAllWindows()
@@ -1045,6 +1284,10 @@ local function PrefsPath() return ConfigPath:gsub("%.json$", "") .. "_prefs.json
 function BeautifulUI:SaveWindowPrefs(force)
     if not PrefsEnabled and not force then return end
     local data = {Theme = BeautifulUI.CurrentThemeName, Windows = {}}
+    if FontConfig.Applied and FontConfig.FamilyName then
+        data.Font = { Family = FontConfig.FamilyName, SizeScale = FontConfig.SizeScale,
+                      Bold = FontConfig.Bold, Monospace = FontConfig.Monospace }
+    end
     for _, w in ipairs(OpenWindows) do
         if w.SaveLayout then
             local ok, layout = pcall(w.SaveLayout, w)
@@ -1064,6 +1307,13 @@ function BeautifulUI:LoadWindowPrefs()
     local ok, data = pcall(HttpService.JSONDecode, HttpService, content)
     if not ok or type(data) ~= "table" then return {} end
     if data.Theme and Themes[data.Theme] then BeautifulUI:SetTheme(data.Theme) end
+    if type(data.Font) == "table" and data.Font.Family then
+        pcall(function()
+            BeautifulUI:SetCustomFont(data.Font.Family, {
+                SizeScale = data.Font.SizeScale, Bold = data.Font.Bold, Monospace = data.Font.Monospace,
+            })
+        end)
+    end
     return data.Windows or {}
 end
 
@@ -1073,6 +1323,7 @@ local WindowDefaults = {}
 function BeautifulUI:ResetSettings()
     pcall(function() if delfile and isfile and isfile(PrefsPath()) then delfile(PrefsPath()) end end)
     self:SetTheme("Purple")
+    pcall(function() self:ResetFont() end)
     for _, w in ipairs(OpenWindows) do
         local d = WindowDefaults[w]
         if d then
@@ -1475,6 +1726,14 @@ function BeautifulUI:CreateWindow(config)
     local showConfig = config.ShowConfig == true
     local forceCompact = config.Compact
     local backdrop = config.Backdrop == true
+    -- 🅰️ свой шрифт прямо в конфиге окна.
+    -- Применяем ПОСЛЕ постройки элементов (task.defer), иначе первый шрифт
+    -- «запечётся» только у тех текстов, что уже успели создаться.
+    local configFont = config.Font
+    local configFontOpts = {
+        Weight = config.FontWeight, SizeScale = config.FontSizeScale,
+        Bold = config.FontBold, Monospace = config.FontMonospace,
+    }
 
     local baseW = (config.Size and config.Size.X.Offset > 0) and config.Size.X.Offset or (IsMobile and 400 or 780)
     local baseH = (config.Size and config.Size.Y.Offset > 0) and config.Size.Y.Offset or (IsMobile and 320 or 580)
@@ -1700,6 +1959,10 @@ function BeautifulUI:CreateWindow(config)
     local pagesContainer = Create("Frame", {Name = "Pages", Size = UDim2.new(1, -(SIDEBAR_W + 12), 1, 0), Position = UDim2.new(0, SIDEBAR_W + 12, 0, 0), BackgroundTransparency = 1, ZIndex = 21, Parent = content})
 
     local emptyState = Create("TextLabel", {Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, Text = "Ничего не найдено 🔍", TextColor3 = Theme.SubText, TextSize = 14, TextTransparency = 0.2, Visible = false, ZIndex = 22, Parent = pagesContainer})
+
+    if configFont ~= nil then
+        task.defer(function() pcall(function() BeautifulUI:SetCustomFont(configFont, configFontOpts) end) end)
+    end
 
     local Window = {
         Gui = gui, Root = root, Main = main, Shadow = shadow, Sidebar = sidebar, PagesContainer = pagesContainer,
@@ -2877,6 +3140,110 @@ end, Get = function() return value end}
         end
 
         -- ─── THEME EDITOR ───
+        -- 🅰️ FONT PICKER — готовый экран настройки шрифта на вкладке
+        -- Использование: local Fonts = Tab:FontPicker({Default = "GothamBlack", OnChange = function(name) end})
+        -- Fonts.Apply("Code", {Bold = true}) применяет вручную, Fonts.Reset() возвращает исходный.
+        function TabAPI:FontPicker(opts)
+            opts = opts or {}
+            RegisterSearchable("шрифт font text", page, tab)
+            BeautifulUI:RegisterCommand({ Name = "Шрифт", Keywords = { "font", "шрифт", "текст" }, Window = Window, Tab = tab.Name })
+
+            local state = { family = opts.Default or FontConfig.FamilyName or (FontConfig.Spec and FontConfig.Spec.Name) or "GothamBold" }
+            local scale = math.floor((FontConfig.SizeScale or 1) * 100 + 0.5)
+            local families = opts.Families or {
+                "Gotham", "GothamMedium", "GothamBold", "GothamSemibold", "GothamBlack",
+                "Code", "SourceSans", "SourceSansBold", "Roboto", "RobotoMono", "RobotoCondensed",
+                "Cartoon", "SciFi", "Fantasy", "Antique", "Arcade", "Bangers", "Creepster",
+                "LuckiestGuy", "Michroma", "Oswald", "PressStart2P", "PermanentMarker",
+                "SpecialElite", "IndieFlower", "GrenzeGotisch", "FredokaOne", "Nunito",
+            }
+
+            -- ── карточка-образец ──
+            local card = Create("Frame", { Size = UDim2.new(1, 0, 0, 84), BackgroundColor3 = Theme.Secondary, BorderSizePixel = 0, Parent = page })
+            Corner(8, card)
+            local cardStroke = Stroke(Theme.Tertiary, 1, 0.75, card)
+            local sample = Create("TextLabel", { Size = UDim2.new(1, -24, 0, 36), Position = UDim2.new(0, 12, 0, 10), BackgroundTransparency = 1, Font = Enum.Font[state.family] or Enum.Font.GothamBold, Text = opts.Sample or "Пример текста · BeautifulUI 0123", TextColor3 = Theme.Text, TextSize = 21, TextXAlignment = Enum.TextXAlignment.Left, Parent = card })
+            local sampleSub = Create("TextLabel", { Size = UDim2.new(1, -24, 0, 18), Position = UDim2.new(0, 12, 0, 50), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = "так будет выглядеть текст во всём интерфейсе", TextColor3 = Theme.SubText, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, Parent = card })
+            local modeLbl = Create("TextLabel", { Size = UDim2.new(0, 120, 0, 14), Position = UDim2.new(1, -132, 0, 54), BackgroundTransparency = 1, Font = Enum.Font.Code, Text = fontSupportsFace() and "FontFace" or "Enum.Font", TextColor3 = Theme.SubText, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Right, TextTransparency = 0.25, Parent = card })
+            registerThemeElement(card, function()
+                card.BackgroundColor3 = Theme.Secondary
+                cardStroke.Color = Theme.Tertiary
+                sample.TextColor3 = Theme.Text
+                sampleSub.TextColor3 = Theme.SubText
+                modeLbl.TextColor3 = Theme.SubText
+            end)
+
+            local function refreshSample()
+                sample.Font = Enum.Font[state.family] or Enum.Font.GothamBold
+                sample.Text = tostring(opts.Sample or "Пример текста · BeautifulUI 0123")
+                modeLbl.Text = fontSupportsFace() and "FontFace" or "Enum.Font"
+            end
+
+            local function apply(family, extra)
+                extra = extra or {}
+                local ok, info = BeautifulUI:SetCustomFont(family, {
+                    SizeScale = scale / 100,
+                    Bold = extra.Bold ~= nil and extra.Bold or opts.Bold,
+                    Weight = extra.Weight or opts.Weight,
+                    Monospace = extra.Monospace ~= nil and extra.Monospace or opts.Monospace,
+                })
+                if ok then
+                    state.family = family
+                    FontConfig.FamilyName = family
+                    refreshSample()
+                    if opts.OnChange then Safe(opts.OnChange, family, info) end
+                end
+                return ok, info
+            end
+
+            -- ── выбор семейства ──
+            local familyDropdown = TabAPI.Dropdown(page, "Шрифт", families, function(value)
+                apply(value)
+            end, "FontFamily")
+
+            -- ── масштаб ──
+            TabAPI.Slider(page, "Масштаб текста", 80, 140, scale, function(value)
+                scale = value
+                apply(state.family)
+            end, "FontScale", { suffix = "%" })
+
+            -- ── свой шрифт по ID / json-пути ──
+            TabAPI.Input(page, "Свой шрифт: ID или имя", "напр. 12187365375 или PressStart2P", function(text)
+                if not text or text == "" then return end
+                local ok, info = apply(text)
+                if not ok then
+                    BeautifulUI:Toast("Шрифт не распознан: " .. tostring(text), "Warning")
+                elseif opts.OnChange == nil then
+                    BeautifulUI:Toast("Шрифт: " .. tostring(info and info.Font or text), "Success")
+                end
+            end, "FontCustom")
+
+            -- ── жирность и моно ──
+            TabAPI.Toggle(page, "Жирный текст", FontConfig.Bold == true, function(on)
+                apply(state.family, { Bold = on })
+            end, "FontBold")
+
+            TabAPI.Toggle(page, "Не трогать моноширинные", FontConfig.Monospace == true, function(on)
+                apply(state.family, { Monospace = on })
+            end, "FontMono")
+
+            -- ── действия ──
+            TabAPI.Button(page, "Тест шрифта", function() BeautifulUI:PreviewFont() end, "Outline", "🧪")
+            TabAPI.Button(page, "Сбросить шрифт", function()
+                BeautifulUI:ResetFont()
+                refreshSample()
+                modeLbl.Text = fontSupportsFace() and "FontFace" or "Enum.Font"
+            end, "Ghost", "↺")
+
+            local api = {
+                Apply = apply,
+                Reset = function() BeautifulUI:ResetFont() refreshSample() end,
+                GetFamily = function() return state.family end,
+                IsFaceMode = fontSupportsFace,
+            }
+            if opts.Default then task.defer(function() apply(opts.Default) end) end
+            return api
+        end
         function TabAPI:ThemeEditor()
             local frame = Create("Frame", {Size = UDim2.new(1, 0, 0, 44), BackgroundColor3 = Theme.Secondary, BorderSizePixel = 0, Parent = page, ClipsDescendants = true})
             Corner(8, frame)
@@ -3956,6 +4323,134 @@ end
 
 -- 🔄 Проверка обновлений: сравните свою версию с версией по URL
 -- BeautifulUI:CheckForUpdates("https://raw.githubusercontent.com/you/repo/main/version.txt")
+
+-- ─── Публичный API кастомного шрифта ───
+-- BeautifulUI:SetCustomFont("GothamBlack")
+-- BeautifulUI:SetCustomFont(12187365375, {Weight = "Bold", SizeScale = 1.1})
+-- BeautifulUI:SetCustomFont({Family = "Code", Bold = false})
+function BeautifulUI:SetCustomFont(family, opts)
+    opts = type(opts) == "table" and opts or {}
+    local spec
+    if type(family) == "table" and family.Family ~= nil then
+        -- вариант {Family = ..., Weight = ...}
+        for k, v in pairs(family) do if k ~= "Family" and opts[k] == nil then opts[k] = v end end
+        spec = parseFontSpec(family.Family)
+    else
+        spec = parseFontSpec(family)
+    end
+    if not spec then
+        if DebugConsole then DebugConsole:Warn("SetCustomFont: неизвестный шрифт", tostring(family)) end
+        return false, "unrecognized font: " .. tostring(family)
+    end
+
+    FontConfig.Spec = spec
+    FontConfig.Family = family
+    FontConfig.Weight = opts.Weight or opts.weight
+    if type(FontConfig.Weight) == "string" then
+        FontConfig.Weight = Enum.FontWeight[FontConfig.Weight] or Enum.FontWeight.Regular
+    end
+    FontConfig.Style = opts.Style or opts.style
+    if type(FontConfig.Style) == "string" then
+        FontConfig.Style = Enum.FontStyle[FontConfig.Style] or Enum.FontStyle.Normal
+    end
+    FontConfig.Bold = opts.Bold
+    FontConfig.SizeScale = tonumber(opts.SizeScale or opts.sizeScale) or 1
+    FontConfig.LineHeight = tonumber(opts.LineHeight or opts.lineHeight)
+    FontConfig.Monospace = opts.Monospace == true
+    FontConfig.Applied = true
+    FontConfig.Active = true
+    FontConfig.FamilyName = spec.Name
+
+    -- применяем ко всем открытым окнам (и к спрятанным тоже — они в OpenWindows)
+    local total = 0
+    for _, win in ipairs(OpenWindows) do
+        total = total + restoreWindowFonts(win)
+    end
+    FontConfig.AppliedCount = total
+    return true, {
+        Font = spec.Name,
+        Applied = total,
+        FaceMode = fontSupportsFace() and "FontFace" or "Enum.Font",
+    }
+end
+
+function BeautifulUI:ResetFont()
+    for obj, rec in pairs(FontRegistry) do
+        if obj.Parent then
+            if rec.baseSize then obj.TextSize = rec.baseSize end
+            pcall(function() obj.FontFace = nil end)
+            if rec.original then pcall(function() obj.Font = rec.original end) end
+            if FontConfig.LineHeight and obj.LineHeight ~= nil then pcall(function() obj.LineHeight = 1 end) end
+        end
+    end
+    FontConfig.Spec, FontConfig.Family, FontConfig.Applied = nil, nil, nil
+    FontConfig.FamilyName, FontConfig.Active = nil, false
+    FontConfig.SizeScale, FontConfig.Bold, FontConfig.Weight, FontConfig.Style = 1, nil, nil, nil
+    FontConfig.AppliedCount = 0
+    return true
+end
+
+function BeautifulUI:GetFont()
+    return FontConfig.Spec and FontConfig.Spec.Name or nil
+end
+
+-- 📋 Все шрифты, которые можно передать в SetCustomFont
+function BeautifulUI:GetAvailableFonts()
+    local out = {}
+    local ok = pcall(function()
+        for _, item in ipairs(Enum.Font:GetEnumItems()) do
+            table.insert(out, item.Name)
+        end
+    end)
+    if not ok or #out == 0 then
+        for _, n in ipairs({ "Gotham", "GothamBold", "GothamMedium", "GothamBlack", "GothamSemibold", "Code", "SourceSans", "SourceSansBold", "Roboto", "RobotoBold", "Legacy", "Arial", "Bodoni", "Cartoon", "Fantasy", "SciFi", "Antique", "Garamond", "Highway", "Bangers", "Creepster", "DenkOne", "Fondamento", "FredokaOne", "GrenzeGotisch", "IndieFlower", "JosefinSans", "Jura", "Kalam", "LuckiestGuy", "Merriweather", "Michroma", "Nunito", "Oswald", "PatrickHand", "PermanentMarker", "PressStart2P", "RobotoMono", "Sarpanch", "SpecialElite", "TitilliumWeb", "Ubuntu" }) do
+            table.insert(out, n)
+        end
+    end
+    table.sort(out)
+    return out
+end
+
+-- 📐 Сколько текстовых объектов сейчас под управлением шрифта
+function BeautifulUI:GetFontStats()
+    local alive, total = 0, 0
+    for obj in pairs(FontRegistry) do
+        total = total + 1
+        if obj.Parent then alive = alive + 1 end
+    end
+    return {
+        Tracked = total,
+        Alive = alive,
+        Applied = FontConfig.Spec and FontConfig.Spec.Name or nil,
+        SizeScale = FontConfig.SizeScale or 1,
+        Mode = fontSupportsFace() and "FontFace" or "Enum.Font",
+    }
+end
+
+-- 🧪 Живой тест: показать образец текста во всевозможных начертаниях
+function BeautifulUI:PreviewFont(font, opts)
+    local before = FontConfig.Applied
+    if font ~= nil then
+        local ok = self:SetCustomFont(font, opts)
+        if not ok then return false end
+    end
+    local win = OpenWindows[1]
+    if not win then
+        return false, "нужно хотя бы одно открытое окно (или передай window вторым аргументом)"
+    end
+    local sample = "Съешь ещё этих мягких булок 0123456789 ABC abc — ƒłü"
+    self:DialogBox({
+        Title = "Тест шрифта: " .. tostring(self:GetFont() or "по умолчанию"),
+        Content = sample .. "\n\nРежим: " .. (fontSupportsFace() and "FontFace (любой ассет)" or "Enum.Font (только встроенные)") ..
+            "\nОбъектов под шрифтом: " .. tostring((self:GetFontStats()).Alive),
+        Buttons = {
+            { Text = "Применить", Callback = function() end },
+            { Text = "Сбросить", Callback = function() self:ResetFont() end },
+        },
+    })
+    return true, before
+end
+
 function BeautifulUI:CheckForUpdates(url, notify)
     if not url or url == "" then return nil end
     local ok, body = pcall(function()
@@ -3986,6 +4481,8 @@ function BeautifulUI:GetBuildInfo()
         Version = BeautifulUI.Version,
         Mobile = IsMobile,
         Theme = BeautifulUI.CurrentThemeName,
+        Font = FontConfig.Applied and FontConfig.FamilyName or nil,
+        FontMode = fontSupportsFace() and "FontFace" or "Enum.Font",
         Windows = #OpenWindows,
         Commands = #CommandList,
         Animations = #Animations,

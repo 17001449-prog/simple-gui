@@ -51,6 +51,9 @@
         discordInvite: "",
         compact: false,
         libUrl: "",
+        font: "",
+        fontScale: 100,
+        fontPicker: false,
       },
       colors: {},
       tabs: [
@@ -170,6 +173,45 @@
       });
       wrap.appendChild(row);
     }
+  }
+
+  /* шрифт превью: ближайшее к Roblox семейство + масштаб из настроек */
+  const PREVIEW_FONTS = {
+    GothamBlack: '"Inter", "Segoe UI", system-ui, sans-serif',
+    GothamBold: '"Inter", "Segoe UI", system-ui, sans-serif',
+    GothamSemibold: '"Inter", "Segoe UI", system-ui, sans-serif',
+    GothamMedium: '"Inter", "Segoe UI", system-ui, sans-serif',
+    Gotham: '"Inter", "Segoe UI", system-ui, sans-serif',
+    Code: '"JetBrains Mono", "Cascadia Code", "Consolas", monospace',
+    RobotoMono: '"JetBrains Mono", "Cascadia Code", "Consolas", monospace',
+    Roboto: 'Roboto, "Segoe UI", system-ui, sans-serif',
+    SourceSans: '"Source Sans Pro", "Segoe UI", system-ui, sans-serif',
+    SourceSansBold: '"Source Sans Pro", "Segoe UI", system-ui, sans-serif',
+    Cartoon: '"Comic Sans MS", "Chalkboard SE", cursive',
+    Fantasy: '"Papyrus", "Luminari", fantasy',
+    SciFi: '"Orbitron", "Eurostile", "Michroma", sans-serif',
+    Michroma: '"Michroma", "Orbitron", sans-serif',
+    Oswald: '"Oswald", "Impact", sans-serif',
+    PressStart2P: '"Press Start 2P", "Courier New", monospace',
+    LuckiestGuy: '"Luckiest Guy", "Impact", fantasy',
+    Bangers: '"Bangers", Impact, fantasy',
+    IndieFlower: '"Indie Flower", "Comic Sans MS", cursive',
+    PermanentMarker: '"Permanent Marker", "Comic Sans MS", cursive',
+  };
+
+  function applyPreviewFont() {
+    const w = state.window;
+    const stack = PREVIEW_FONTS[w.font] || PREVIEW_FONTS.Gotham;
+    const scale = (Number(w.fontScale) || 100) / 100;
+    const win = $("#win");
+    win.style.setProperty("--win-font", stack);
+    win.style.setProperty("--win-font-scale", String(scale));
+    // жирность даёт сам Roblox-шрифт: в превью это наклон/вес через класс
+    const boldLike = /Bold|Black|Semibold|SemiBold|Luckiest|Bangers|Oswald/.test(w.font || "Gotham");
+    win.classList.toggle("font-bold", boldLike);
+    win.classList.toggle("font-mono", /Code|Mono/.test(w.font || ""));
+    const label = $("#win-font-state");
+    if (label) label.textContent = w.font ? `${w.font} · ${Math.round(scale * 100)}%` : "по умолчанию";
   }
 
   function applyPreviewTheme() {
@@ -619,7 +661,7 @@
 
     const footer = $("#sidebar-footer");
     footer.innerHTML = "";
-    footer.append(el("span", "ver-label", "BeautifulUI v6.2"));
+    footer.append(el("span", "ver-label", "BeautifulUI v6.3"));
     if (w.showConfig) {
       const btns = el("div", "footer-btns");
       btns.append(el("span", null, "💾"), el("span", null, "📂"));
@@ -628,6 +670,25 @@
     $("#device").classList.toggle("mobile", state.device === "mobile");
     $("#win").style.setProperty("--win-w", `${w.width}px`);
     $("#win").style.setProperty("--win-h", `${w.height}px`);
+  }
+
+  const FONT_PRESETS = [
+    "Gotham", "GothamMedium", "GothamBold", "GothamSemibold", "GothamBlack",
+    "Code", "Roboto", "RobotoMono", "SourceSans", "SourceSansBold",
+    "Cartoon", "SciFi", "Fantasy", "Antique", "Arcade", "Bangers", "Creepster",
+    "LuckiestGuy", "Michroma", "Oswald", "PressStart2P", "PermanentMarker",
+    "SpecialElite", "IndieFlower", "GrenzeGotisch", "FredokaOne", "Nunito",
+  ];
+
+  function renderFontPresets() {
+    const list = $("#font-presets");
+    if (!list) return;
+    list.innerHTML = "";
+    for (const name of FONT_PRESETS) {
+      const o = document.createElement("option");
+      o.value = name;
+      list.appendChild(o);
+    }
   }
 
   /* фильтрация вкладок поиском в превью */
@@ -666,6 +727,10 @@
     if (w.backdrop) push("    Backdrop = true,");
     if (w.compact) push("    Compact = true,");
     if (w.discord && w.discordInvite) push(`    Discord = ${luaStr(w.discordInvite)},`);
+    if (w.font) push(`    Font = ${luaStr(w.font)},`);
+    if (w.font && Number(w.fontScale) && Number(w.fontScale) !== 100) {
+      push(`    FontSizeScale = ${Number(w.fontScale) / 100},`);
+    }
     push("})");
     push("");
 
@@ -675,8 +740,13 @@
       push("");
     }
 
-    for (const tab of state.tabs) {
+    for (let i = 0; i < state.tabs.length; i++) {
+      const tab = state.tabs[i];
       push(`local ${varForTab(tab)} = Window:Tab(${luaStr(tab.name)}${tab.icon ? ", " + luaStr(tab.icon) : ""})`);
+      if (i === 0 && w.fontPicker) {
+        push(`-- готовый экран: шрифт, масштаб, свой ID, жирность, тест`);
+        push(`local Fonts = ${varForTab(tab)}:FontPicker({Default = ${luaStr(w.font || "GothamBold")}})`);
+      }
       for (const item of tab.elements) {
         const code = elementLua(item, tab);
         if (code) code.forEach((l) => push(l));
@@ -834,6 +904,11 @@
       next.window.showConfig = /ShowConfig\s*=\s*true/.test(body);
       next.window.backdrop = /Backdrop\s*=\s*true/.test(body);
       next.window.compact = /Compact\s*=\s*true/.test(body);
+      const font = body.match(/\bFont\s*=\s*"([^"]*)"/);
+      if (font) next.window.font = font[1];
+      const fscale = body.match(/FontSizeScale\s*=\s*([\d.]+)/);
+      if (fscale) next.window.fontScale = Math.round(Number(fscale[1]) * 100);
+      next.window.fontPicker = /:FontPicker\(/.test(src);
       const url = src.match(/game:HttpGet\("([^"]+)"\)/);
       if (url && !/ВАШ_URL/.test(url[1])) next.window.libUrl = url[1];
       const discord = body.match(/Discord\s*=\s*"([^"]*)"/);
@@ -1017,6 +1092,12 @@
     bindText("#win-icon", "icon");
     bindText("#win-discord-invite", "discordInvite");
     bindText("#win-lib-url", "libUrl");
+    bindText("#win-font", "font", () => { applyPreviewFont(); renderPreviewWindow(); });
+    bindText("#win-font-scale", "fontScale", applyPreviewFont);
+    $("#win-fontpicker").onchange = (e) => {
+      W().fontPicker = e.target.value === "1";
+      renderCode(); save();
+    };
 
     const themeSel = $("#win-theme");
     themeSel.onchange = () => {
@@ -1164,6 +1245,9 @@
     $("#win-compact").checked = !!state.window.compact;
     $("#win-discord-invite").value = state.window.discordInvite || "";
     $("#win-lib-url").value = state.window.libUrl || "";
+    $("#win-font").value = state.window.font || "";
+    $("#win-font-scale").value = state.window.fontScale || 100;
+    $("#win-fontpicker").value = state.window.fontPicker ? "1" : "0";
     $("#discord-field").hidden = !state.window.discord;
     document.body.classList.toggle("light", state.appTheme === "light");
     $("#stage").classList.toggle("with-grid", !!state.showGrid);
@@ -1173,6 +1257,7 @@
 
     renderPalette();
     applyPreviewTheme();
+    applyPreviewFont();
     renderTabList();
     renderAddGrid();
     renderElementList();
@@ -1186,6 +1271,7 @@
     load();
     bindPanel();
     bindPreviewSearch();
+    renderFontPresets();
     renderAll();
     if (!localStorage.getItem(LS_KEY)) {
       seedDemo();

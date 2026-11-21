@@ -146,6 +146,19 @@ function Compat:CreateWindow(cfg)
         RawSetDiscord(BeautifulUI, {Invite = discordInvite})
     end
 
+    -- шрифт: Rayfield пишет его либо строкой, либо таблицей {Font=..., Weight=...}
+    local cfgFont, cfgFontOpts
+    if type(cfg.Font) == "string" or type(cfg.Font) == "number" then
+        cfgFont = cfg.Font
+    elseif type(cfg.Font) == "table" then
+        cfgFont = cfg.Font.Font or cfg.Font.Family or cfg.Font.Name
+        cfgFontOpts = {
+            Weight = cfg.Font.Weight,
+            SizeScale = cfg.Font.SizeScale or cfg.TextSize,
+            Bold = cfg.Font.Bold,
+        }
+    end
+
     local win = RawCreateWindow(BeautifulUI, {
         Title = cfg.Name or "RayfieldCompat",
         Subtitle = cfg.LoadingSubtitle or ("v" .. BeautifulUI.Version),
@@ -153,6 +166,10 @@ function Compat:CreateWindow(cfg)
         ShowConfig = (type(cfg.ConfigurationSaving) == "table" and cfg.ConfigurationSaving.Enabled) or false,
         Backdrop = false,
         Discord = discordInvite ~= nil or nil,
+        Font = cfgFont,
+        FontWeight = cfgFontOpts and cfgFontOpts.Weight or nil,
+        FontSizeScale = cfgFontOpts and cfgFontOpts.SizeScale or nil,
+        FontBold = cfgFontOpts and cfgFontOpts.Bold or nil,
     })
 
     local windowObj = {}
@@ -318,6 +335,9 @@ end
 -- ═══════════════════════════════════════════════
 -- Экспорт: отдаём BeautifulUI как «Rayfield»
 -- ═══════════════════════════════════════════════
+-- 🅰️ шрифты: в Rayfield это тоже умеют, отдаём нативные методы под удобными именами
+BeautifulUI.SetFont = BeautifulUI.SetFont or function(self, family, opts) return self:SetCustomFont(family, opts) end
+
 BeautifulUI.RayfieldCreateWindow = Compat.CreateWindow
 BeautifulUI.RayfieldNotify = Compat.Notify
 BeautifulUI.RayfieldDestroy = Compat.Destroy

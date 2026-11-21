@@ -1,4 +1,4 @@
-# SimpleUI — BeautifulUI v6.2
+# SimpleUI — BeautifulUI v6.3
 
 Один файл `SimpleUI.txt` — UI-библиотека для Roblox (Luau). Вставьте содержимое в `ModuleScript`
 или загружайте строкой:
@@ -181,6 +181,48 @@ BeautifulUI:RefreshDiscord()
 
 Палитра и хоткеи не срабатывают, когда фокус в текстовом поле, так что они не мешают
 поиску и вводу значений.
+
+## 🅰️ Свой шрифт (Custom Font)
+
+Весь интерфейс можно переключить на любой шрифт — встроенный `Enum.Font`, шрифт из
+Marketplace по ID или собственный `.json`-ассет. Переключается на лету, вместе с
+уже созданными элементами и закрытыми окнами.
+
+```lua
+-- в конфиге окна
+local Window = BeautifulUI:CreateWindow({
+    Title = "My Hub",
+    Font = "GothamBlack",        -- имя Enum.Font, ID (12187365375) или "rbxasset://fonts/…"
+    FontSizeScale = 1.15,        -- все тексты +15%
+})
+
+-- на лету, для всего интерфейса
+BeautifulUI:SetCustomFont("PressStart2P")
+BeautifulUI:SetCustomFont(12187365375, { SizeScale = 1.1, Bold = false })
+BeautifulUI:SetCustomFont({ Family = "Code", Monospace = true })
+BeautifulUI:ResetFont()          -- вернуть исходные шрифты и размеры
+```
+
+| Возможность | Детали |
+|---|---|
+| **Любой шрифт** | `FontFace` + `Font.new/fromId/fromEnum` — поддержаны ассеты Marketplace, а не только встроенные |
+| **Масштаб текста** | `SizeScale` 0.8–1.4: `TextSize` пересчитывается от исходного, без «накопления» при повторных вызовах |
+| **Сохранение жирности** | заголовки остаются жирными, подписи — обычными: жирность запоминается при создании элемента |
+| **Моно-режим** | `Monospace = true` не трогает `Code`-надписи (HEX-поля, консоль) |
+| **Образец** | `BeautifulUI:PreviewFont("Oswald")` — живой тест со всеми символами и кириллицей |
+| **Fallback** | если клиент не умеет `FontFace`, автоматически переключается на `Enum.Font` (без ошибок) |
+| **Инспектор** | `GetAvailableFonts()` — список шрифтов, `GetFontStats()` — сколько текстов под управлением |
+| **Готовый экран** | `Tab:FontPicker({Default = "GothamBlack"})` — дропдаун, масштаб, своё ID, жирность, тест одной строкой |
+| **Автосохранение** | выбранный шрифт пишется в `<config>_prefs.json` и восстанавливается при следующем запуске |
+
+```lua
+local Tab = Window:Tab("Шрифт", "🅰️")
+local Fonts = Tab:FontPicker({ Default = "GothamBlack", OnChange = function(name)
+    print("шрифт:", name)
+end })
+Fonts.Apply("Michroma")
+Fonts.Reset()
+```
 
 ## 🎨 UI-редактор (HTML)
 

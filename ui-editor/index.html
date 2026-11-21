@@ -75,6 +75,24 @@
         <span>URL библиотеки (raw)</span>
         <input id="win-lib-url" type="text" placeholder="https://…/SimpleUI.txt" />
       </label>
+      <div class="row">
+        <label class="field">
+          <span>Шрифт (Font)</span>
+          <input id="win-font" type="text" list="font-presets" placeholder="GothamBlack" />
+          <datalist id="font-presets"></datalist>
+        </label>
+        <label class="field">
+          <span>Масштаб текста, %</span>
+          <input id="win-font-scale" type="number" min="80" max="140" step="5" value="100" />
+        </label>
+      </div>
+      <label class="field">
+        <span>Готовый экран настройки шрифта</span>
+        <select id="win-fontpicker">
+          <option value="0">не добавлять</option>
+          <option value="1">Tab:FontPicker() в первой вкладке</option>
+        </select>
+      </label>
     </section>
 
     <section class="card">
@@ -120,6 +138,7 @@
               <div class="win-title" id="win-title-label">My Hub</div>
               <div class="win-subtitle" id="win-subtitle-label">v1.0</div>
             </div>
+            <div class="win-font-state" id="win-font-state" title="Активный шрифт превью">по умолчанию</div>
             <div class="win-actions">
               <button class="win-btn" id="win-discord-btn" title="Discord" hidden>💬</button>
               <button class="win-btn" title="Свернуть">–</button>
@@ -134,7 +153,7 @@
               </div>
               <div class="tabs" id="preview-tabs"></div>
               <div class="sidebar-footer" id="sidebar-footer">
-                <span class="ver-label">BeautifulUI v6.2</span>
+                <span class="ver-label">BeautifulUI v6.3</span>
               </div>
             </div>
             <div class="pages" id="pages"></div>
