@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BeautifulUI · UI-редактор</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">⚡</div>
+    <div>
+      <div class="brand-title">BeautifulUI <span class="ver">UI-редактор</span></div>
+      <div class="brand-sub">Собирай интерфейс мышкой → получай готовый Lua</div>
+    </div>
+  </div>
+
+  <div class="topbar-actions">
+    <div class="seg" role="group" aria-label="Тема оформления">
+      <button class="seg-btn" data-app-theme="dark">🌙</button>
+      <button class="seg-btn" data-app-theme="light">☀️</button>
+    </div>
+    <button class="btn ghost" id="btn-import">Импорт Lua</button>
+    <button class="btn ghost" id="btn-preview-code">Предпросмотр кода</button>
+    <button class="btn primary" id="btn-copy">Скопировать код</button>
+  </div>
+</header>
+
+<main class="layout">
+  <!-- ═══ ЛЕВАЯ КОЛОНКА: настройки ═══ -->
+  <aside class="panel settings">
+    <section class="card">
+      <h2>Окно</h2>
+      <label class="field">
+        <span>Заголовок</span>
+        <input id="win-title" type="text" value="My Hub" />
+      </label>
+      <label class="field">
+        <span>Подзаголовок</span>
+        <input id="win-subtitle" type="text" value="v1.0" />
+      </label>
+      <div class="row">
+        <label class="field">
+          <span>Иконка</span>
+          <input id="win-icon" type="text" value="⚡" maxlength="4" />
+        </label>
+        <label class="field">
+          <span>Тема</span>
+          <select id="win-theme"></select>
+        </label>
+      </div>
+      <div class="row">
+        <label class="field">
+          <span>Ширина</span>
+          <input id="win-w" type="number" value="780" min="280" max="1400" />
+        </label>
+        <label class="field">
+          <span>Высота</span>
+          <input id="win-h" type="number" value="580" min="220" max="1000" />
+        </label>
+      </div>
+      <div class="toggles">
+        <label class="chk"><input type="checkbox" id="win-config" checked /> Кнопки конфига</label>
+        <label class="chk"><input type="checkbox" id="win-backdrop" /> Затемнение фона</label>
+        <label class="chk"><input type="checkbox" id="win-discord" /> Discord-кнопка</label>
+        <label class="chk"><input type="checkbox" id="win-compact" /> Компактный режим</label>
+      </div>
+      <label class="field" id="discord-field" hidden>
+        <span>Discord-инвайт (код)</span>
+        <input id="win-discord-invite" type="text" placeholder="myserver" />
+      </label>
+      <label class="field">
+        <span>URL библиотеки (raw)</span>
+        <input id="win-lib-url" type="text" placeholder="https://…/SimpleUI.txt" />
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>Палитра</h2>
+      <div class="palette-grid" id="palette"></div>
+      <p class="hint">Клик по цвету — открыть палитру, правый клик — скопировать HEX. Изменения видны сразу.</p>
+      <button class="btn ghost small" id="btn-reset-theme">Вернуть цвета темы</button>
+    </section>
+
+    <section class="card">
+      <h2>Вкладки</h2>
+      <div id="tabs-list" class="tabs-list"></div>
+      <button class="btn ghost small" id="btn-add-tab">+ Вкладка</button>
+    </section>
+
+    <section class="card">
+      <h2>Элементы вкладки</h2>
+      <div class="add-grid" id="add-grid"></div>
+      <p class="hint">Добавляется в выбранную вкладку. Порядок можно менять стрелками в списке ниже.</p>
+      <div id="elements-list" class="elements-list"></div>
+    </section>
+  </aside>
+
+  <!-- ═══ ЦЕНТР: превью ═══ -->
+  <section class="panel preview">
+    <div class="preview-bar">
+      <div class="seg" role="group" aria-label="Устройство">
+        <button class="seg-btn active" data-device="desktop">🖥 Десктоп</button>
+        <button class="seg-btn" data-device="mobile">📱 Мобильный</button>
+      </div>
+      <label class="chk small"><input type="checkbox" id="show-grid" /> сетка</label>
+      <span class="spacer"></span>
+      <button class="btn ghost small" id="btn-reset-layout">Сбросить раскладку</button>
+      <button class="btn ghost small danger" id="btn-clear">Очистить всё</button>
+    </div>
+
+    <div class="stage" id="stage">
+      <div class="device" id="device">
+        <div class="win" id="win">
+          <div class="win-topbar">
+            <div class="win-logo" id="win-logo">⚡</div>
+            <div class="win-titles">
+              <div class="win-title" id="win-title-label">My Hub</div>
+              <div class="win-subtitle" id="win-subtitle-label">v1.0</div>
+            </div>
+            <div class="win-actions">
+              <button class="win-btn" id="win-discord-btn" title="Discord" hidden>💬</button>
+              <button class="win-btn" title="Свернуть">–</button>
+              <button class="win-btn" title="Закрыть">✕</button>
+            </div>
+          </div>
+          <div class="win-body">
+            <div class="sidebar" id="sidebar">
+              <div class="search">
+                <span class="search-ico">🔍</span>
+                <input id="preview-search" type="text" placeholder="Поиск…" />
+              </div>
+              <div class="tabs" id="preview-tabs"></div>
+              <div class="sidebar-footer" id="sidebar-footer">
+                <span class="ver-label">BeautifulUI v6.2</span>
+              </div>
+            </div>
+            <div class="pages" id="pages"></div>
+          </div>
+        </div>
+        <div class="empty-hint" id="empty-hint">
+          <div>🎛</div>
+          <p>Добавь вкладку и элементы слева — превью появится здесь.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ ПРАВАЯ КОЛОНКА: код ═══ -->
+  <aside class="panel code">
+    <div class="code-head">
+      <h2>Lua-код</h2>
+      <div class="code-actions">
+        <button class="icon-btn" id="btn-download" title="Скачать .lua">⬇</button>
+        <button class="icon-btn" id="btn-refresh-code" title="Обновить">⟳</button>
+      </div>
+    </div>
+    <pre class="code-block"><code id="code-out"></code></pre>
+    <div class="code-foot">
+      <span id="code-stats">—</span>
+      <span class="dot">·</span>
+      <span>готово к вставке в Roblox</span>
+    </div>
+  </aside>
+</main>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="modal-title">Импорт Lua</h3>
+      <button class="icon-btn" id="modal-close">✕</button>
+    </div>
+    <p class="hint" id="modal-hint">Вставь код, сгенерированный этим редактором (или похожий).</p>
+    <textarea id="modal-textarea" spellcheck="false" placeholder="BeautifulUI:CreateWindow({ ... })"></textarea>
+    <div class="modal-actions">
+      <button class="btn ghost" id="modal-cancel">Отмена</button>
+      <button class="btn primary" id="modal-ok">Импортировать</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="themes.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
