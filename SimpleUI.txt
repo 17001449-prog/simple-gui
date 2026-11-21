@@ -1,5 +1,5 @@
 --[[
-    ✨ BeautifulUI Library v6.0 — UI/UX overhaul
+    ✨ BeautifulUI Library v6.2 — UI/UX overhaul
     ────────────────────────────────────────────
     🎨 Дизайн
     • Новая шапка с логотипом, мягкая тень окна, тонкие обводки и градиенты
@@ -80,7 +80,7 @@ local C
 BeautifulUI.DebugUsers = {}
 BeautifulUI.BuiltInDebug = ""
 BeautifulUI.IsMobile = IsMobile
-BeautifulUI.Version = "6.0"
+BeautifulUI.Version = "6.2"
 
 -- ═══════════════════════════════════════════════
 -- 🔍 SEARCH INDEX (для поиска по элементам вкладок)
@@ -223,6 +223,98 @@ end
 local function RegisterKeybind(obj, handler)
     InitKeybindManager()
     KeybindEntries[obj] = handler
+end
+
+-- ✨ Мигание элемента (подсветка при переходе из поиска/палитры)
+local function FlashElement(obj, color, times)
+    if not obj or not obj.Parent then return end
+    local fl = Instance.new("UIStroke")
+    fl.Color = color or Theme.Accent
+    fl.Thickness = 2
+    fl.Transparency = 0
+    fl.Parent = obj
+    task.spawn(function()
+        for i = 1, (times or 2) do
+            Tween(fl, 0.18, {Transparency = 1})
+            task.wait(0.2)
+            Tween(fl, 0.18, {Transparency = 0})
+            task.wait(0.2)
+        end
+        Tween(fl, 0.25, {Transparency = 1})
+        task.wait(0.3)
+        if fl.Parent then fl:Destroy() end
+    end)
+end
+BeautifulUI.FlashElement = FlashElement
+
+-- ⌨️ Глобальный реестр горячих клавиш (для тоста-подсказки)
+local Hotkeys = {}
+
+-- Регистрирует клавишу, которой управляет пользовательский скрипт.
+-- showToast = true добавляет её в памятку по Ctrl+.
+function BeautifulUI:RegisterHotkey(key, label, showToast)
+    table.insert(Hotkeys, {Key = key, Label = label or "—", Show = showToast ~= false})
+end
+
+local function KeyDisplay(key)
+    if typeof(key) == "EnumItem" then return key.Name end
+    return tostring(key)
+end
+
+function BeautifulUI:ShowHotkeys()
+    local self_ = self
+    if type(self_) ~= "table" then self_ = BeautifulUI end
+    local lines = {
+        "Ctrl+K — палитра команд",
+        "Ctrl+. — эта памятка",
+        "Ctrl+Shift+R — сброс настроек",
+        "Ваша кнопка окна — показать/скрыть интерфейс",
+    }
+    for _, h in ipairs(Hotkeys) do
+        if h.Show then
+            table.insert(lines, KeyDisplay(h.Key) .. " — " .. h.Label)
+        end
+    end
+    local text = table.concat(lines, "\n")
+    pcall(function() self_:Notify("Горячие клавиши", text, 8, "Info") end)
+    return text
+end
+
+-- ═══════════════════════════════════════════════
+-- ⌨️ ВСТРОЕННЫЕ ГОРЯЧИЕ КЛАВИШИ
+-- Ctrl+K — палитра команд, Ctrl+. — памятка, Ctrl+Shift+R — сброс настроек
+-- ═══════════════════════════════════════════════
+local BuiltinHotkeysReady = false
+local function InitBuiltinHotkeys()
+    if BuiltinHotkeysReady then return end
+    BuiltinHotkeysReady = true
+    UserInputService.InputBegan:Connect(function(input, gpe)
+        if gpe or input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+        local k = input.KeyCode
+        local ctrl = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
+        if not ctrl then return end
+        local shift = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+
+        if k == Enum.KeyCode.K then
+            if BeautifulUI.IsCommandPaletteOpen and BeautifulUI:IsCommandPaletteOpen() then
+                BeautifulUI:CloseCommandPalette()
+            else
+                BeautifulUI:OpenCommandPalette()
+            end
+        elseif k == Enum.KeyCode.Period and not shift then
+            BeautifulUI:ShowHotkeys()
+        elseif k == Enum.KeyCode.R and shift then
+            BeautifulUI:ResetSettings()
+        end
+    end)
+
+    -- Esc закрывает палитру
+    UserInputService.InputBegan:Connect(function(input, gpe)
+        if gpe then return end
+        if input.KeyCode == Enum.KeyCode.Escape and BeautifulUI.IsCommandPaletteOpen and BeautifulUI:IsCommandPaletteOpen() then
+            BeautifulUI:CloseCommandPalette()
+        end
+    end)
 end
 
 -- Нажатие без «дрожания»: не срабатывает, если пользователь скроллил список
@@ -430,6 +522,7 @@ function BeautifulUI:SetTheme(name)
         BeautifulUI.Theme = Theme
         BeautifulUI.CurrentThemeName = name
         ReapplyThemeAllWindows()
+        if PrefsEnabled then task.delay(1, function() pcall(BeautifulUI.SaveWindowPrefs, BeautifulUI) end) end
         return true
     end
     return false
@@ -932,8 +1025,80 @@ end
 -- ═══════════════════════════════════════════════
 local ConfigFlags = {}
 local ConfigPath = "BeautifulUI_Config.json"
+local PrefsEnabled = true
+
+local ConfigDefaults = {}
 
 function BeautifulUI:SetConfigPath(p) ConfigPath = p end
+function BeautifulUI:SetPreferencesEnabled(enabled) PrefsEnabled = enabled ~= false end
+
+-- 🏷️ Ярлыки в конфиге: SetConfigLabel("Speed", "Скорость", " studs/s")
+local ConfigLabels = {}
+function BeautifulUI:SetConfigLabel(flag, label, suffix)
+    ConfigLabels[flag] = {Label = label, Suffix = suffix or ""}
+end
+function BeautifulUI:GetConfigLabels() return ConfigLabels end
+
+-- 💾 Настройки окна (позиция/размер/тема) — сохраняются сами
+local function PrefsPath() return ConfigPath:gsub("%.json$", "") .. "_prefs.json" end
+
+function BeautifulUI:SaveWindowPrefs(force)
+    if not PrefsEnabled and not force then return end
+    local data = {Theme = BeautifulUI.CurrentThemeName, Windows = {}}
+    for _, w in ipairs(OpenWindows) do
+        if w.SaveLayout then
+            local ok, layout = pcall(w.SaveLayout, w)
+            if ok and type(layout) == "table" then table.insert(data.Windows, layout) end
+        end
+    end
+    local okJ, encoded = pcall(HttpService.JSONEncode, HttpService, data)
+    if okJ then pcall(function() if writefile then writefile(PrefsPath(), encoded) end end) end
+end
+
+function BeautifulUI:LoadWindowPrefs()
+    local content
+    pcall(function()
+        if readfile and isfile and isfile(PrefsPath()) then content = readfile(PrefsPath()) end
+    end)
+    if not content then return {} end
+    local ok, data = pcall(HttpService.JSONDecode, HttpService, content)
+    if not ok or type(data) ~= "table" then return {} end
+    if data.Theme and Themes[data.Theme] then BeautifulUI:SetTheme(data.Theme) end
+    return data.Windows or {}
+end
+
+-- ♻️ Сброс пользовательских настроек (позиция/размер/тема → по умолчанию)
+local WindowDefaults = {}
+
+function BeautifulUI:ResetSettings()
+    pcall(function() if delfile and isfile and isfile(PrefsPath()) then delfile(PrefsPath()) end end)
+    self:SetTheme("Purple")
+    for _, w in ipairs(OpenWindows) do
+        local d = WindowDefaults[w]
+        if d then
+            pcall(function()
+                w:SetSize(d.Width, d.Height)
+                w:Center()
+            end)
+        end
+    end
+    self:Notify("Настройки", "Сброшены к значениям по умолчанию ♻️", 3, "Success")
+end
+
+-- Применяем сохранённую тему ещё до открытия окна
+task.defer(function()
+    pcall(function()
+        local content
+        if readfile and isfile and isfile(PrefsPath()) then content = readfile(PrefsPath()) end
+        if content then
+            local ok, data = pcall(HttpService.JSONDecode, HttpService, content)
+            if ok and type(data) == "table" and data.Theme and Themes[data.Theme] then
+                ApplyTheme(Themes[data.Theme])
+                BeautifulUI.CurrentThemeName = data.Theme
+            end
+        end
+    end)
+end)
 
 function BeautifulUI:SaveConfig()
     local data = {}
@@ -964,6 +1129,56 @@ end
 
 function BeautifulUI:DeleteConfig()
     pcall(function() if delfile and isfile and isfile(ConfigPath) then delfile(ConfigPath) end end)
+end
+
+-- 🔀 Миграция конфига: переименовать/удалить/переименовать-по-правилу флаги
+-- BeautifulUI:MigrateConfig({rename = {OldFlag = "NewFlag"}, remove = {"DeadFlag"}})
+function BeautifulUI:MigrateConfig(rules)
+    if type(rules) ~= "table" then return false end
+    for _, flag in ipairs(rules.remove or {}) do
+        if ConfigFlags[flag] then ConfigFlags[flag] = nil end
+    end
+    for oldFlag, newFlag in pairs(rules.rename or {}) do
+        local entry = ConfigFlags[oldFlag]
+        if entry and not ConfigFlags[newFlag] then
+            ConfigFlags[newFlag] = entry
+            ConfigFlags[oldFlag] = nil
+        end
+    end
+    return true
+end
+
+-- 📤 Экспорт конфига в читаемый текст (для «поделиться настройками»)
+function BeautifulUI:ExportConfig()
+    local lines = {}
+    local labels = ConfigLabels
+    for k, v in pairs(ConfigFlags) do
+        if v.Get then
+            local ok, val = pcall(v.Get, v)
+            if ok then
+                if type(val) == "table" then
+                    local parts = {}
+                    for i, item in ipairs(val) do parts[i] = tostring(item) end
+                    val = table.concat(parts, ", ")
+                end
+                local meta = labels[k]
+                local label = meta and meta.Label or k
+                table.insert(lines, string.format("%s = %s", label, tostring(val) .. (meta and meta.Suffix or "")))
+            end
+        end
+    end
+    table.sort(lines)
+    return table.concat(lines, "\n")
+end
+
+-- 📥 Импорт: показывает текущие значения и загружает конфиг по кнопке
+function BeautifulUI:ShowConfigSummary()
+    local text = self:ExportConfig()
+    if text == "" then text = "Пока нечего сохранять" end
+    return self:Notify("Текущий конфиг", text, 10, "Info", {
+        {Text = "Сохранить", Color = Theme.Success, Callback = function() self:SaveConfig() end},
+        {Text = "Закрыть", Color = Theme.Tertiary},
+    })
 end
 
 -- ═══════════════════════════════════════════════
@@ -1264,6 +1479,14 @@ function BeautifulUI:CreateWindow(config)
     local baseW = (config.Size and config.Size.X.Offset > 0) and config.Size.X.Offset or (IsMobile and 400 or 780)
     local baseH = (config.Size and config.Size.Y.Offset > 0) and config.Size.Y.Offset or (IsMobile and 320 or 580)
 
+    -- Discord = true → используем уже настроенный инвайт (SetDiscord),
+    -- Discord = "код" или {Invite="код", ...} → настраиваем здесь
+    if type(config.Discord) == "string" then
+        BeautifulUI:SetDiscord({Invite = config.Discord})
+    elseif type(config.Discord) == "table" then
+        BeautifulUI:SetDiscord(config.Discord)
+    end
+
     if config.Theme and Themes[config.Theme] then
         ApplyTheme(Themes[config.Theme])
         BeautifulUI.CurrentThemeName = config.Theme
@@ -1381,9 +1604,21 @@ function BeautifulUI:CreateWindow(config)
     local closeBtn = mkTopButton("✕", -42, Theme.Danger)
     local collapseBtn = mkTopButton("–", -80, Theme.Text)
 
+    local discordBtn
+    if config.Discord then
+        discordBtn = mkTopButton("💬", -118, Theme.Info)
+        discordBtn.MouseButton1Click:Connect(function() BeautifulUI:ShowDiscord() end)
+        coroutine.wrap(function()
+            local info = BeautifulUI:GetDiscordInfo()
+            if info and info.members then
+                discordBtn.Text = "💬 " .. BeautifulUI:FormatCount(info.members)
+            end
+        end)()
+    end
+
     local debugBtn
     if IsDebugUser() then
-        debugBtn = mkTopButton("🐛", -118, Theme.Warning)
+        debugBtn = mkTopButton("🐛", discordBtn and -156 or -118, Theme.Warning)
         debugBtn.MouseButton1Click:Connect(function() DebugConsole:Toggle() end)
     end
 
@@ -1431,6 +1666,37 @@ function BeautifulUI:CreateWindow(config)
         versionLbl.Size = UDim2.new(1, -80, 1, 0)
     end
 
+    local discordWidget
+    local discordJoinBtn
+    local DiscordWidgetRef
+    if config.Discord then
+        discordWidget = Create("Frame", {Size = UDim2.new(1, -16, 0, 44), Position = UDim2.new(0, 8, 1, -90), BackgroundColor3 = Theme.Info, BackgroundTransparency = 0.9, BorderSizePixel = 0, ZIndex = 23, Parent = sidebar})
+        Corner(8, discordWidget)
+        local dwStroke = Stroke(Theme.Info, 1, 0.75, discordWidget)
+        discordJoinBtn = Create("TextButton", {Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 24, Parent = discordWidget})
+        Create("TextLabel", {Size = UDim2.new(0, 22, 1, 0), Position = UDim2.new(0, 8, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = "💬", TextColor3 = Theme.Info, TextSize = 13, ZIndex = 24, Parent = discordWidget})
+        local dwTitle = Create("TextLabel", {Size = UDim2.new(1, -34, 0, 16), Position = UDim2.new(0, 32, 0, 6), BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = "Discord", TextColor3 = Theme.Text, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 24, Parent = discordWidget})
+        local dwStatus = Create("TextLabel", {Size = UDim2.new(1, -34, 0, 14), Position = UDim2.new(0, 32, 0, 24), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = "открыть", TextColor3 = Theme.SubText, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 24, Parent = discordWidget})
+        discordJoinBtn.MouseEnter:Connect(function() Tween(discordWidget, 0.12, {BackgroundTransparency = 0.8}) end)
+        discordJoinBtn.MouseLeave:Connect(function() Tween(discordWidget, 0.12, {BackgroundTransparency = 0.9}) end)
+        OnTap(discordJoinBtn, function() BeautifulUI:ShowDiscord() end)
+        -- регистрация виджета произойдёт после создания таблицы Window
+        local function refreshDiscordWidget()
+            local info = BeautifulUI:GetDiscordInfo()
+            if not info then return end
+            local name = info.name or ("discord.gg/" .. tostring(info.invite))
+            dwTitle.Text = name
+            if info.members then
+                dwStatus.Text = string.format("%s онлайн · %s участников", BeautifulUI:FormatCount(info.online), BeautifulUI:FormatCount(info.members))
+            elseif info.error then
+                dwStatus.Text = "присоединяйтесь →"
+            else
+                dwStatus.Text = "discord.gg/" .. tostring(info.invite)
+            end
+        end
+        DiscordWidgetRef = {Frame = discordWidget, Title = dwTitle, Status = dwStatus, Stroke = dwStroke, Refresh = refreshDiscordWidget}
+    end
+
     local pagesContainer = Create("Frame", {Name = "Pages", Size = UDim2.new(1, -(SIDEBAR_W + 12), 1, 0), Position = UDim2.new(0, SIDEBAR_W + 12, 0, 0), BackgroundTransparency = 1, ZIndex = 21, Parent = content})
 
     local emptyState = Create("TextLabel", {Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, Text = "Ничего не найдено 🔍", TextColor3 = Theme.SubText, TextSize = 14, TextTransparency = 0.2, Visible = false, ZIndex = 22, Parent = pagesContainer})
@@ -1441,6 +1707,18 @@ function BeautifulUI:CreateWindow(config)
         Icon = iconButton, Content = content, SearchBox = searchBox, Compact = false,
     }
     Window.Visible = true
+
+    if DiscordWidgetRef then
+        Window._discordWidget = DiscordWidgetRef
+        Window._refreshDiscord = DiscordWidgetRef.Refresh
+        -- если Discord-кнопка есть в сайдбаре, футер поднимаем выше
+        task.defer(function()
+            if sidebarFooter and sidebarFooter.Parent then
+                sidebarFooter.Position = UDim2.new(0, 8, 1, -128)
+            end
+            pcall(DiscordWidgetRef.Refresh)
+        end)
+    end
 
     -- ═══ ПОИСК ═══
     local function applySearch()
@@ -1579,6 +1857,20 @@ function BeautifulUI:CreateWindow(config)
     end
 
     table.insert(OpenWindows, Window)
+    WindowDefaults[Window] = {Width = baseW, Height = baseH}
+
+    -- применяем ранее сохранённые позицию/размер/вкладку
+    task.defer(function()
+        local ok, list = pcall(BeautifulUI.LoadWindowPrefs, BeautifulUI)
+        if ok and type(list) == "table" then
+            local saved
+            for _, layout in ipairs(list) do
+                if layout.Title == titleLabel.Text then saved = layout break end
+            end
+            saved = saved or list[1]
+            if saved then pcall(function() Window:ApplyLayout(saved) end) end
+        end
+    end)
 
     -- ═══ УПРАВЛЕНИЕ ОКНОМ ═══
     local visible = true
@@ -1654,7 +1946,34 @@ function BeautifulUI:CreateWindow(config)
     function Window:Center()
         root.Position = UDim2.new(0.5, 0, 0.5, 0)
     end
+    -- 💾 Персистентность раскладки: позиция/размер/вкладка
+    function Window:SaveLayout()
+        return {
+            Title = titleLabel.Text,
+            PosX = root.Position.X.Offset, PosY = root.Position.Y.Offset,
+            Width = currentSize.X, Height = currentSize.Y,
+            Tab = Window.ActiveTab and Window.ActiveTab.Name or nil,
+        }
+    end
+
+    function Window:ApplyLayout(layout)
+        if type(layout) ~= "table" then return end
+        if layout.Width and layout.Height then
+            baseW, baseH = layout.Width, layout.Height
+            applyResponsive(false)
+        end
+        if layout.PosX and layout.PosY then
+            root.Position = UDim2.new(0.5, layout.PosX, 0.5, layout.PosY)
+            clampToViewport()
+        end
+        if layout.Tab then pcall(function() Window:SelectTab(layout.Tab) end) end
+    end
+
     function Window:Destroy()
+        BeautifulUI:SaveWindowPrefs()
+        if next(ConfigFlags) and next(ConfigFlags) ~= nil then
+            pcall(function() BeautifulUI:SaveConfig() end)
+        end
         BeautifulUI.StopAnimation(iconButton)
         for i, w in ipairs(OpenWindows) do
             if w == Window then table.remove(OpenWindows, i) break end
@@ -1895,6 +2214,7 @@ function BeautifulUI:CreateWindow(config)
             end)
 
             RegisterSearchable(text, page, tab)
+            BeautifulUI:RegisterCommand({Name = text, Keywords = {"кнопка", "button"}, Window = Window, Tab = tab.Name, Element = btn, Callback = callback})
 
             -- 🔧 Хелперы на самой кнопке
             btn.SetText = function(t) btn.Text = (icon and icon ~= "" and (icon .. "  ") or "") .. tostring(t) end
@@ -2012,6 +2332,7 @@ function BeautifulUI:CreateWindow(config)
                 Tween(knob, 0.2, {Position = state and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9), BackgroundColor3 = state and Theme.Text or Theme.SubText})
                 if fire then Safe(callback, state) end
             end
+            BeautifulUI:RegisterCommand({Name = text, Keywords = {"тумблер", "toggle"}, Window = Window, Tab = tab.Name, Element = frame})
             frame.MouseEnter:Connect(function() if state then Tween(switchBg, 0.12, {BackgroundTransparency = 0}) else Tween(frame, 0.12, {BackgroundTransparency = 0.25}) end end)
             frame.MouseLeave:Connect(function() Tween(frame, 0.12, {BackgroundTransparency = 0}); if state then Tween(switchBg, 0.12, {BackgroundTransparency = 0}) end end)
             OnTap(frame, function() state = not state; update(true) end)
@@ -2051,6 +2372,7 @@ function BeautifulUI:CreateWindow(config)
             frame.MouseEnter:Connect(function() Tween(frame, 0.12, {BackgroundTransparency = 0.2}) end)
             frame.MouseLeave:Connect(function() Tween(frame, 0.12, {BackgroundTransparency = 0}) end)
             RegisterSearchable(text .. " " .. (description or ""), page, tab)
+            BeautifulUI:RegisterCommand({Name = text, Keywords = {"тумблер", "toggle", description or ""}, Window = Window, Tab = tab.Name, Element = frame})
             local api
             api = patchSet({Get = function() return state end}, function(v) state = v and true or false; update(false) end)
             if flag then ConfigFlags[flag] = api end
@@ -2150,12 +2472,15 @@ end, Get = function() return value end}
         -- opts (необязательный 7-й аргумент): {step = 1, suffix = " studs/s"}
         function TabAPI:Slider(text, min, max, default, callback, flag, opts)
             RegisterSearchable(text, page, tab)
-            return TabAPI:_mkSlider(page, text, min, max, default, callback, flag, opts)
+            local el = TabAPI:_mkSlider(page, text, min, max, default, callback, flag, opts)
+            BeautifulUI:RegisterCommand({Name = text, Keywords = {"слайдер", "slider"}, Window = Window, Tab = tab.Name})
+            return el
         end
 
         -- ─── INPUT SLIDER (слайдер с полем ввода) ───
         function TabAPI:InputSlider(text, min, max, default, callback, flag)
             RegisterSearchable(text, page, tab)
+            BeautifulUI:RegisterCommand({Name = text, Keywords = {"слайдер", "slider", "ввод"}, Window = Window, Tab = tab.Name})
             min, max = min or 0, max or 100
             if max == min then max = min + 1 end
             local value = math.clamp(default or min, min, max)
@@ -2215,6 +2540,7 @@ end, Get = function() return value end}
 
         function TabAPI:Input(text, placeholder, callback, flag)
             RegisterSearchable(text, page, tab)
+            BeautifulUI:RegisterCommand({Name = text, Keywords = {"ввод", "input", placeholder or ""}, Window = Window, Tab = tab.Name})
             local frame = Create("Frame", {Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = Theme.Secondary, BorderSizePixel = 0, Parent = page})
             Corner(8, frame)
             local lbl = Create("TextLabel", {Size = UDim2.new(0, 100, 1, 0), Position = UDim2.new(0, 12, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, Text = text, TextColor3 = Theme.Text, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = frame})
@@ -2312,6 +2638,7 @@ end, Get = function() return value end}
         -- multi = true → мультивыбор; opts: {multi = true, maxSelected = nil}
         function TabAPI:Dropdown(text, options, callback, flag, opts)
             opts = opts or {}
+            BeautifulUI:RegisterCommand({Name = text, Keywords = {"список", "dropdown"}, Window = Window, Tab = tab.Name})
             local multi = opts.multi and true or false
             options = options or {}
             RegisterSearchable(text .. " " .. table.concat(options, " "), page, tab)
@@ -2482,6 +2809,7 @@ end, Get = function() return value end}
         -- ─── COLOR PICKER ───
         function TabAPI:ColorPicker(text, default, callback, flag)
             RegisterSearchable(text, page, tab)
+            BeautifulUI:RegisterCommand({Name = text, Keywords = {"цвет", "color", "picker"}, Window = Window, Tab = tab.Name})
             default = C(default, Color3.fromRGB(255, 100, 100))
             local hue, sat, val = Color3.toHSV(default)
             local frame = Create("Frame", {Size = UDim2.new(1, 0, 0, 165), BackgroundColor3 = Theme.Secondary, BorderSizePixel = 0, Parent = page})
@@ -2631,6 +2959,7 @@ end, Get = function() return value end}
 
         -- ─── KEYBIND ───
         function TabAPI:Keybind(text, default, callback, flag)
+            BeautifulUI:RegisterCommand({Name = text, Keywords = {"клавиша", "keybind", "hotkey"}, Window = Window, Tab = tab.Name})
             local currentKey = default or Enum.KeyCode.F
             local listening = false
             local frame = Create("TextButton", {Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = Theme.Secondary, BorderSizePixel = 0, Text = "", Parent = page})
@@ -3347,8 +3676,248 @@ end
 end
 
 -- ═══════════════════════════════════════════════
+-- 💬 DISCORD
+-- ═══════════════════════════════════════════════
+-- Конфиг: config.Discord = {Invite = "мойсервер", Remember = true, Reminder = 300}
+--   Invite    — код приглашения (без discord.gg/)
+--   Remember  — true: подсказка один раз, навсегда запомнить «уже вступил»
+--   Reminder  — через сколько секунд напомнить снова (0 — не напоминать)
+local DiscordConfig = {Invite = nil, Remember = true, Reminder = 300, Name = nil}
+local DiscordLastReminder = 0
+local DiscordPrompted = false
+local DiscordInfoCache = {time = 0, data = nil}
+
+function BeautifulUI:SetDiscord(config)
+    if type(config) == "string" then config = {Invite = config} end
+    if type(config) ~= "table" then return DiscordConfig end
+    for k, v in pairs(config) do DiscordConfig[k] = v end
+    DiscordInfoCache = {time = 0, data = nil}
+end
+
+function BeautifulUI:GetDiscordConfig() return DiscordConfig end
+
+-- Полный URL инвайта
+function BeautifulUI:GetDiscordURL()
+    if not DiscordConfig.Invite or DiscordConfig.Invite == "" then return nil end
+    return "https://discord.gg/" .. tostring(DiscordConfig.Invite)
+end
+
+-- 12345 → «12.3k», 1500000 → «1.5M»
+function BeautifulUI:FormatCount(n)
+    n = tonumber(n)
+    if not n then return "—" end
+    if n >= 1000000 then return string.format("%.1fM", n / 1000000) end
+    if n >= 1000 then return string.format("%.1fk", n / 1000) end
+    return tostring(math.floor(n))
+end
+
+-- Открывает приглашение в браузере
+function BeautifulUI:OpenDiscord()
+    local url = self:GetDiscordURL()
+    if not url then
+        return self:Notify("Discord", "Инвайт не настроен: BeautifulUI:SetDiscord({Invite = \"код\"})", 4, "Warning")
+    end
+    local ok = pcall(function() setclipboard(url) end)
+    if not ok then pcall(function() game:GetService("Players"):SetClipboard(url) end) end
+    self:Notify("Discord", "Ссылка скопирована:\n" .. url, 5, "Info",
+        {{Text = "Вступить", Callback = function() pcall(function() setclipboard(url) end) end}})
+    return url
+end
+
+-- Живая статистика сервера (кэш 5 минут)
+-- 👉 Подставь свой endpoint, если он есть:
+-- BeautifulUI.DiscordEndpoint = function(invite) return "https://мой-сайт/api/invite/" .. invite end
+function BeautifulUI:GetDiscordInfo(inviteOverride)
+    local invite = inviteOverride or DiscordConfig.Invite
+    if not invite or invite == "" then return nil end
+    local now = os.clock()
+    if DiscordInfoCache.data and (now - DiscordInfoCache.time) < 300 then return DiscordInfoCache.data end
+
+    local data = {invite = invite, name = DiscordConfig.Name}
+
+    if BeautifulUI.DiscordEndpoint and HttpService.HttpEnabled ~= false then
+        local ok, body = pcall(function()
+            return HttpService:JSONDecode(game:HttpGet(BeautifulUI.DiscordEndpoint(invite)))
+        end)
+        if ok and type(body) == "table" then
+            data.name = body.name or data.name
+            data.members = body.members or body.member_count or body.approximate_member_count
+            data.online = body.online or body.presence_count or body.approximate_presence_count
+        else
+            data.error = true
+        end
+    end
+
+    DiscordInfoCache = {time = now, data = data}
+    return data
+end
+
+-- Обновить виджеты во всех окнах
+function BeautifulUI:RefreshDiscord()
+    DiscordInfoCache = {time = 0, data = nil}
+    for _, w in ipairs(OpenWindows) do
+        if w._refreshDiscord then pcall(w._refreshDiscord) end
+    end
+end
+
+-- Кнопка «вступить» с показом ссылки (используется в шапке и сайдбаре)
+function BeautifulUI:ShowDiscord()
+    local info = self:GetDiscordInfo()
+    local title = (info and info.name) or "Discord"
+    local text
+    if info and info.members then
+        text = string.format("%s онлайн · %s участников", self:FormatCount(info.online), self:FormatCount(info.members))
+    else
+        text = "Присоединяйтесь к сообществу"
+    end
+    if DiscordConfig.Invite then text = text .. "\ndiscord.gg/" .. tostring(DiscordConfig.Invite) end
+    return self:Notify(title, text, 6, "Info", {
+        {Text = "Копировать", Color = Theme.Accent, Callback = function() self:OpenDiscord() end},
+        {Text = "Закрыть", Color = Theme.Tertiary},
+    })
+end
+
+-- Напоминание о вступлении (вызывается из throttle-цикла внизу файла)
+function BeautifulUI:DiscordTick()
+    local cfg = DiscordConfig
+    if not cfg.Invite or cfg.Invite == "" then return end
+    if cfg.Remember and DiscordPrompted then return end
+    local now = os.clock()
+    if cfg.Reminder and cfg.Reminder > 0 and (now - DiscordLastReminder) < cfg.Reminder then return end
+    DiscordLastReminder = now
+    DiscordPrompted = true
+
+    self:Notify("Наш Discord", "Там обновления, читы и поддержка\ndiscord.gg/" .. tostring(cfg.Invite), 8, "Info", {
+        {Text = "Вступить", Color = Theme.Info, Callback = function() self:OpenDiscord() end},
+        {Text = "Позже", Color = Theme.Tertiary, Callback = function()
+            if not cfg.Remember then DiscordPrompted = false end
+        end},
+    })
+end
+
+-- ═══════════════════════════════════════════════
+-- 🔍 ПАЛИТРА КОМАНД (Ctrl+K) — быстрый поиск по всем настройкам
+-- ═══════════════════════════════════════════════
+local CommandList = {}
+
+function BeautifulUI:RegisterCommand(cmd)
+    if type(cmd) ~= "table" or not cmd.Name then return nil end
+    table.insert(CommandList, cmd)
+    return cmd
+end
+
+function BeautifulUI:GetCommands() return CommandList end
+
+local CommandGui, CommandBox, CommandResults, CommandFrame
+
+local function CloseCommandPalette()
+    if CommandGui then CommandGui.Enabled = false end
+end
+
+local function RunCommand(cmd)
+    if not cmd then return end
+    local w = cmd.Window
+    if w then
+        if not (w.IsVisible and w:IsVisible()) then w:Show() end
+        if cmd.Tab and w.SelectTab then pcall(function() w:SelectTab(cmd.Tab) end) end
+        if cmd.Element then FlashElement(cmd.Element, Theme.Accent, 2) end
+    end
+    Safe(cmd.Callback)
+end
+
+local function RenderCommandResults()
+    if not CommandResults then return end
+    for _, c in ipairs(CommandResults:GetChildren()) do
+        if c:IsA("TextButton") then c:Destroy() end
+    end
+    local q = (CommandBox.Text or ""):lower()
+    local shown, firstMatch = 0, nil
+    for _, cmd in ipairs(CommandList) do
+        local keywords = cmd.Keywords or {}
+        local haystack = (tostring(cmd.Name) .. " " .. table.concat(keywords, " ") .. " " .. tostring(cmd.Tab or "")):lower()
+        if q == "" or haystack:find(q, 1, true) then
+            shown = shown + 1
+            firstMatch = firstMatch or cmd
+            if shown <= 40 then
+                local row = Create("TextButton", {Size = UDim2.new(1, -4, 0, 34), BackgroundColor3 = Theme.Tertiary, BackgroundTransparency = 0.35, BorderSizePixel = 0, Text = "", AutoButtonColor = false, LayoutOrder = shown, Parent = CommandResults})
+                Corner(8, row)
+                Create("TextLabel", {Size = UDim2.new(1, -96, 1, 0), Position = UDim2.new(0, 10, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, Text = tostring(cmd.Name), TextColor3 = Theme.Text, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, Parent = row})
+                Create("TextLabel", {Size = UDim2.new(0, 86, 1, 0), Position = UDim2.new(1, -90, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = tostring(cmd.Tab or ""), TextColor3 = Theme.SubText, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Right, TextTruncate = Enum.TextTruncate.AtEnd, Parent = row})
+                row.MouseEnter:Connect(function() Tween(row, 0.1, {BackgroundTransparency = 0.1}) end)
+                row.MouseLeave:Connect(function() Tween(row, 0.1, {BackgroundTransparency = 0.35}) end)
+                OnTap(row, function()
+                    CloseCommandPalette()
+                    RunCommand(cmd)
+                end)
+            end
+        end
+    end
+    if shown == 0 then
+        Create("TextLabel", {Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = "Ничего не найдено", TextColor3 = Theme.SubText, TextSize = 12, Parent = CommandResults})
+    end
+    CommandFrame.Size = UDim2.new(0, 480, 0, 54 + math.min(math.max(shown, 1), 8) * 37)
+    return firstMatch
+end
+
+local function EnsureCommandPalette()
+    if CommandGui and CommandGui.Parent then return end
+    CommandGui = Create("ScreenGui", {Name = "BeautifulUICommandPalette", ResetOnSpawn = false, Enabled = false, DisplayOrder = 300, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, Parent = (gethui and gethui()) or CoreGui})
+    local backdrop = Create("TextButton", {Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.45, Text = "", AutoButtonColor = false, Parent = CommandGui})
+    CommandFrame = Create("Frame", {Size = UDim2.new(0, 480, 0, 54), Position = UDim2.new(0.5, -240, 0, 140), BackgroundColor3 = Theme.Secondary, BorderSizePixel = 0, Parent = CommandGui})
+    Corner(12, CommandFrame)
+    Stroke(Theme.Accent, 1.5, 0.4, CommandFrame)
+    local searchWrap = Create("Frame", {Size = UDim2.new(1, -20, 0, 40), Position = UDim2.new(0, 10, 0, 8), BackgroundColor3 = Theme.Tertiary, BackgroundTransparency = 0.2, BorderSizePixel = 0, Parent = CommandFrame})
+    Corner(9, searchWrap)
+    Create("TextLabel", {Size = UDim2.new(0, 24, 1, 0), Position = UDim2.new(0, 8, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = "⌕", TextColor3 = Theme.SubText, TextSize = 16, Parent = searchWrap})
+    CommandBox = Create("TextBox", {Size = UDim2.new(1, -44, 1, 0), Position = UDim2.new(0, 34, 0, 0), BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = "", PlaceholderText = "Поиск команды…  (Enter — перейти, Esc — закрыть)", PlaceholderColor3 = Theme.SubText, TextColor3 = Theme.Text, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, ClearTextOnFocus = false, Parent = searchWrap})
+    CommandResults = Create("ScrollingFrame", {Size = UDim2.new(1, -8, 0, 0), Position = UDim2.new(0, 4, 1, 6), BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3, ScrollBarImageColor3 = Theme.Accent, CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y, Parent = CommandFrame})
+    Create("UIListLayout", {Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder, Parent = CommandResults})
+
+    CommandBox:GetPropertyChangedSignal("Text"):Connect(function() RenderCommandResults() end)
+    CommandBox.FocusLost:Connect(function(enter)
+        if not enter then return end
+        local q = (CommandBox.Text or ""):lower()
+        for _, cmd in ipairs(CommandList) do
+            local haystack = (tostring(cmd.Name) .. " " .. table.concat(cmd.Keywords or {}, " ")):lower()
+            if q == "" or haystack:find(q, 1, true) then
+                CloseCommandPalette()
+                RunCommand(cmd)
+                return
+            end
+        end
+    end)
+    backdrop.MouseButton1Click:Connect(CloseCommandPalette)
+end
+
+function BeautifulUI:OpenCommandPalette(initialText)
+    EnsureCommandPalette()
+    CommandGui.Enabled = true
+    CommandBox.Text = initialText or ""
+    RenderCommandResults()
+    task.defer(function()
+        if CommandBox and CommandBox.Parent then pcall(function() CommandBox:CaptureFocus() end) end
+    end)
+end
+
+function BeautifulUI:CloseCommandPalette() CloseCommandPalette() end
+function BeautifulUI:IsCommandPaletteOpen() return CommandGui and CommandGui.Enabled or false end
+
+-- ═══════════════════════════════════════════════
 -- 🔔 ГЛОБАЛЬНЫЕ ХЕЛПЕРЫ
 -- ═══════════════════════════════════════════════
+
+-- 💬 Напоминание о Discord (один лёгкий тикер на всю библиотеку)
+task.spawn(function()
+    task.wait(3)  -- не мешаем загрузке
+    while true do
+        pcall(function()
+            if DiscordConfig and DiscordConfig.Invite and DiscordConfig.Invite ~= "" then
+                BeautifulUI:DiscordTick()
+            end
+        end)
+        task.wait(1)
+    end
+end)
 
 -- Скрыть/показать все окна библиотеки разом
 function BeautifulUI:HideAll()
@@ -3383,6 +3952,45 @@ end
 -- Работает ли библиотека на мобильном устройстве
 function BeautifulUI:IsOnMobile()
     return IsMobile
+end
+
+-- 🔄 Проверка обновлений: сравните свою версию с версией по URL
+-- BeautifulUI:CheckForUpdates("https://raw.githubusercontent.com/you/repo/main/version.txt")
+function BeautifulUI:CheckForUpdates(url, notify)
+    if not url or url == "" then return nil end
+    local ok, body = pcall(function()
+        local res = game:HttpGet(url)
+        return tostring(res):gsub("%s+$", "")
+    end)
+    if not ok or not body or body == "" then
+        if notify then self:Notify("Обновление", "Не удалось проверить версию", 3, "Warning") end
+        return nil
+    end
+    local current = tostring(BeautifulUI.Version)
+    local isNewer = (body ~= current) and (body > current)
+    if notify and isNewer then
+        self:Notify("Доступно обновление", string.format("v%s → v%s", current, body), 8, "Info", {
+            {Text = "Скачать", Color = Theme.Success, Callback = function()
+                pcall(function() setclipboard(url) end)
+            end},
+        })
+    elseif notify then
+        self:Notify("Обновление", "У вас актуальная версия v" .. current, 3, "Success")
+    end
+    return body, isNewer
+end
+
+-- 🧾 Информация о сборке (удобно выводить в консоль/лог)
+function BeautifulUI:GetBuildInfo()
+    return {
+        Version = BeautifulUI.Version,
+        Mobile = IsMobile,
+        Theme = BeautifulUI.CurrentThemeName,
+        Windows = #OpenWindows,
+        Commands = #CommandList,
+        Animations = #Animations,
+        LoadTime = _G.LibraryLoadTime and math.floor((tick() - _G.LibraryLoadTime) * 1000) or 0,
+    }
 end
 
 -- Удобно, когда библиотека грузится из loadstring: не нужно дублировать имя

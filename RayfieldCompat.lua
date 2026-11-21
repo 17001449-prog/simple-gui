@@ -32,8 +32,9 @@
         Элементы возвращают объекты с :Set() / :Get()
 
     Чего НЕТ (сознательно, это честный список):
-        • KeySystem / Discord — виджеты Rayfield не воспроизводятся. KeySystem
-          игнорируется (окно открывается сразу), Discord-кнопка не создаётся.
+        • KeySystem — виджет Rayfield не воспроизводится: окно открывается сразу.
+        • Discord = {Enabled=true, Invite="код"} → превращается в наш Discord-модуль
+          (кнопка в шапке + виджет в сайдбаре + напоминание), а не в кнопку Rayfield.
         • ConfigurationSaving → прозрачно превращается в наш конфиг (флаги
           работают), BUT «несколько разных конфиг-файлов» не поддерживается:
           путь один — RayfieldCompat.json (меняется через BeautifulUI:SetConfigPath).
@@ -54,6 +55,7 @@ local RawCreateWindow = BeautifulUI.CreateWindow
 local RawNotify = BeautifulUI.Notify
 local RawHideAll = BeautifulUI.HideAll
 local RawSetConfigPath = BeautifulUI.SetConfigPath
+local RawSetDiscord = BeautifulUI.SetDiscord
 
 local Compat = {}
 local isMobile = false
@@ -137,12 +139,20 @@ function Compat:CreateWindow(cfg)
         RawSetConfigPath(BeautifulUI, name .. ".json")
     end
 
+    -- Discord из конфига Rayfield ({Enabled, Invite}) → наш модуль
+    local discordInvite
+    if type(cfg.Discord) == "table" and cfg.Discord.Enabled and cfg.Discord.Invite then
+        discordInvite = tostring(cfg.Discord.Invite):gsub("^https?://discord%.gg/", "")
+        RawSetDiscord(BeautifulUI, {Invite = discordInvite})
+    end
+
     local win = RawCreateWindow(BeautifulUI, {
         Title = cfg.Name or "RayfieldCompat",
         Subtitle = cfg.LoadingSubtitle or ("v" .. BeautifulUI.Version),
         Theme = pickTheme(cfg.Theme) or "Purple",
         ShowConfig = (type(cfg.ConfigurationSaving) == "table" and cfg.ConfigurationSaving.Enabled) or false,
         Backdrop = false,
+        Discord = discordInvite ~= nil or nil,
     })
 
     local windowObj = {}
