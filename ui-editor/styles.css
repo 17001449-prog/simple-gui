@@ -425,6 +425,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .props-form input:focus, .props-form select:focus { border-color: var(--accent, #8a2be2); }
 .props-form input[type="color"] { width: 100%; height: 34px; padding: 2px; border-radius: 9px; background: transparent; border: 1px solid var(--border, rgba(255,255,255,0.1)); }
 
+
+/* ── КРИТИЧНО: атрибут hidden должен побеждать любой display ──
+   Без этого .modal{display:grid} / .toast{display:flex} перебивают
+   браузерное [hidden]{display:none} по специфичности — и модалка
+   импорта висела открытой при загрузке страницы. */
+[hidden] { display: none !important; }
+
 /* ── шрифт превью ── */
 #win {
   font-family: var(--win-font, "Inter", "Segoe UI", system-ui, sans-serif);
