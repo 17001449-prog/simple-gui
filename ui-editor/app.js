@@ -104,16 +104,54 @@
   }
 
   /* ─────────────── сохранение ─────────────── */
+  // На file:// (двойной клик по index.html) Chrome иногда запрещает localStorage
+  // и бросает SecurityError. Работаем через обёртку, чтобы редактор не падал.
+  const store = {
+    get(key) {
+      try { return window.localStorage.getItem(key); } catch (_) { return null; }
+    },
+    set(key, value) {
+      try { window.localStorage.setItem(key, value); return true; } catch (_) { return false; }
+    },
+  };
+  let storageWarned = false;
+
+  async function copyText(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (_) {}
+    // запасной путь: работает и на file://
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.cssText = "position:fixed;left:-9999px;top:0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
   let saveTimer;
   function save() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (_) {}
+      const ok = store.set(LS_KEY, JSON.stringify(state));
+      if (!ok && !storageWarned) {
+        storageWarned = true;
+        toast("Сохранение недоступно (file://) — скачай .lua перед закрытием");
+      }
     }, 250);
   }
   function load() {
     try {
-      const raw = localStorage.getItem(LS_KEY);
+      const raw = store.get(LS_KEY);
       if (!raw) return;
       const data = JSON.parse(raw);
       if (!data || !Array.isArray(data.tabs)) return;
@@ -169,7 +207,7 @@
       });
       row.addEventListener("contextmenu", (e) => {
         e.preventDefault();
-        navigator.clipboard?.writeText(value).then(() => toast(`${key}: ${value}`));
+        copyText(value).then((ok) => toast(ok ? `${key}: ${value}` : "Не удалось скопировать"));
       });
       wrap.appendChild(row);
     }
@@ -1067,9 +1105,8 @@
     ok.textContent = "Скопировать";
     const close = () => { modal.hidden = true; ok.onclick = null; };
     ok.onclick = async () => {
-      try { await navigator.clipboard.writeText(textarea.value); }
-      catch (_) { textarea.select(); document.execCommand("copy"); }
-      toast("Скопировано ✅");
+      const done = await copyText(textarea.value);
+      toast(done ? "Скопировано ✅" : "Не удалось скопировать — выдели текст и Ctrl+C");
     };
     $("#modal-close").onclick = close;
     $("#modal-cancel").onclick = close;
@@ -1142,15 +1179,8 @@
 
     $("#btn-copy").onclick = async () => {
       const code = renderCode();
-      try {
-        await navigator.clipboard.writeText(code);
-        toast("Lua-код скопирован ✅");
-      } catch (_) {
-        const ta = document.createElement("textarea");
-        ta.value = code; document.body.appendChild(ta); ta.select();
-        document.execCommand("copy"); ta.remove();
-        toast("Скопировано ✅");
-      }
+      const ok = await copyText(code);
+      toast(ok ? "Lua-код скопирован ✅" : "Буфер обмена недоступен — скачай файл");
     };
 
     $("#btn-download").onclick = () => {
@@ -1273,7 +1303,7 @@
     bindPreviewSearch();
     renderFontPresets();
     renderAll();
-    if (!localStorage.getItem(LS_KEY)) {
+    if (!store.get(LS_KEY)) {
       seedDemo();
       renderAll();
     }
