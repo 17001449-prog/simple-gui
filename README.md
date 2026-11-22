@@ -1,4 +1,4 @@
-# SimpleUI — BeautifulUI v6.4
+# SimpleUI — BeautifulUI v6.5
 
 Один файл `SimpleUI.txt` — UI-библиотека для Roblox (Luau). Вставьте содержимое в `ModuleScript`
 или загружайте строкой:
@@ -38,7 +38,9 @@ tab:Hint("Настройки сохраняются кнопкой 💾 в ле�
 
 | Метод | Описание |
 |---|---|
-| `Button(text, callback, style, icon)` | стили: `Primary`, `Success`, `Danger`, `Warning`, `Gradient`, `Ghost`, `Outline` |
+| `Button(text, callback, style, icon)` | стили: `Primary`, `Success`, `Danger`, `Warning`, `Gradient`, `Ghost`, `Outline`; формы — см. ниже |
+| `Button{Text=…, Callback=…, Shape=…}` | табличная форма: удобно, когда параметров много |
+| `IconButton(icon, callback)` | компактная кнопка-иконка 40×40 |
 | `Toggle(text, default, callback, flag)` | тумблер |
 | `InfoToggle(text, description, default, callback, flag)` | тумблер с подписью |
 | `Slider(text, min, max, default, callback, flag)` | слайдер с ползунком |
@@ -48,7 +50,7 @@ tab:Hint("Настройки сохраняются кнопкой 💾 в ле�
 | `ColorPicker(text, default, callback, flag)` | HSB-палитра + HEX |
 | `Keybind(text, default, callback, flag)` | привязка клавиши |
 | `ProgressBar(text, max)` | `:Set(v)`, `:Get()` |
-| `Graph(text, type, height)` | `line`, `area`, `bar`; `:AddPoint()`, `:SetData()`, `:SetRange()`, `:SetAutoRange()`, `:SetColor()`, `:SetMaxPoints()`, `:Clear()`, `:GetData()` |
+| `Graph(text, type, height, opts)` | 7 типов (см. раздел «Графики»); `:AddPoint()`, `:SetData()`, `:SetRange()`, `:SetAutoRange()`, `:SetColor()`, `:SetMaxPoints()`, `:SetLegend()`, `:GetLegend()`, `:Clear()`, `:GetData()` |
 | `Label(text, color)` · `Paragraph(text)` · `Separator()` | текст |
 | `Status(label, value, type)` | значение-статус в чипе (`Success`/`Danger`/`Warning`/`Info`) |
 | `Hint(text)` | неброская подсказка |
@@ -182,6 +184,30 @@ BeautifulUI:RefreshDiscord()
 Палитра и хоткеи не срабатывают, когда фокус в текстовом поле, так что они не мешают
 поиску и вводу значений.
 
+## 🔘 Формы кнопок
+
+По умолчанию все кнопки скруглены одинаково. Форма задаётся третьим полем старого
+вызова или ключом `Shape` в табличной форме — старые вызовы не ломаются.
+
+```lua
+Tab:Button("Старт", function() print("go") end, "Success", "🚀")   -- как раньше
+Tab:Button{ Text = "Стоп", Callback = cb, Style = "Danger", Shape = "Pill" }
+Tab:IconButton("⚙", function() end)                                -- 40×40, только иконка
+
+local b = Tab:Button("Ещё", cb)
+b:SetShape("Square")   -- сменить на лету
+b:SetHeight(48)        -- и высоту
+```
+
+| `Shape` | Радиус | Для чего |
+|---|---|---|
+| `Round` | 9 | по умолчанию, обычные кнопки |
+| `Pill` | 18 | «капсулы», панели действий |
+| `Square` | 6 | плотные списки |
+| `Sharp` | 0 | строгий/техно-стиль |
+| `Circle` | 18 (40×40) | иконки, круглые кнопки |
+| `Wide` | 9, высота 44 | крупный призыв к действию |
+
 ## 📈 Графики: 7 типов и как работает отрисовка
 
 График рисуется **без картинок и без Drawing API** — из обычных `Frame`:
@@ -217,6 +243,35 @@ g:Destroy()                       -- убрать и отписаться от H
 | `pie` | кольцо с сегментами | доли от целого |
 | `radial` | лучи из центра + многоугольник | «радар» характеристик |
 | `stacked` | линия + заливка (как area) | несколько серий |
+
+### Легенда
+
+Легенда живёт под графиком отдельным рядом: чип цвета + подпись.
+
+```lua
+-- статичная легенда (например, «доли сервера»)
+Tab:Graph("Игроки", "pie", 160, {
+    Legend = {
+        {Name = "RU",  Value = "40%", Color = "#00FFDC"},
+        {Name = "EU",  Value = "35%"},
+        {Name = "US",  Value = "25%"},
+    },
+    Data = {40, 35, 25},
+})
+
+-- для pie легенда с процентами включается сама, подписи можно задать:
+Tab:Graph("Доли", "pie", 160, { Data = {30, 50, 20}, LegendLabels = {"A", "B", "C"} })
+
+-- или управлять вручную
+local g = Tab:Graph("FPS", "line", 160)
+g:SetLegend({{Name = "FPS", Value = "60"}})   -- создать/заменить
+g:GetLegend()                                  -- последний список
+g:SetLegend(nil)                               -- скрыть (и не показывать при перерисовке)
+g:GetLegendFrame()                             -- сам кадр, если нужна тонкая настройка
+```
+
+Высота кадра автоматически растёт при появлении легенды, поэтому соседние элементы
+не наезжают на неё. Скрытая легенда не «воскресает» после перерисовки данных.
 
 Что важно про производительность:
 
@@ -359,3 +414,10 @@ Rayfield:Notify({Title = "Загружено", Content = "Ок", Duration = 3})
 - График рисуется через пул объектов: нет `Instance.new`/`Destroy` на каждый кадр.
 - Слайдеры/тумблеры/графики восстанавливают состояние через `:Set(...)` — в v5
   это ломалось из-за обращения к `api` до его объявления.
+
+### Что нового в v6.5
+
+- **Формы кнопок**: `Shape` = `Round`/`Pill`/`Square`/`Sharp`/`Circle`/`Wide`,
+  табличный вызов `Button{...}`, `IconButton`, `:SetShape()`/`:SetHeight()`.
+- **Легенда графиков**: `opts.Legend`, авто-доли для `pie`, `:SetLegend()`/`:GetLegend()`.
+- В редакторе появились поля «Форма кнопки» и «Легенда», они попадают в генерацию Lua.

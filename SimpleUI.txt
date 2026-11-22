@@ -82,7 +82,7 @@ local applyFontTo -- forward-declaration: применить шрифт к од�
 BeautifulUI.DebugUsers = {}
 BeautifulUI.BuiltInDebug = ""
 BeautifulUI.IsMobile = IsMobile
-BeautifulUI.Version = "6.4"
+BeautifulUI.Version = "6.5"
 
 -- ═══════════════════════════════════════════════
 -- 🔍 SEARCH INDEX (для поиска по элементам вкладок)
@@ -2429,7 +2429,16 @@ function BeautifulUI:CreateWindow(config)
             Outline = {bg = "Background", hover = "Tertiary"},
         }
 
-        function TabAPI:_mkButton(parent, text, callback, style, icon)
+        -- Поддерживаем оба стиля вызова:
+        --   Tab:Button("Текст", cb, "Gradient", "🚀")
+        --   Tab:Button{Text = "Текст", Callback = cb, Shape = "Pill", Size = 40}
+        function TabAPI:_mkButton(parent, text, callback, style, icon, data)
+            if type(text) == "table" then
+                data = text
+                text, callback, style, icon = data.Text or data.text or "Кнопка", data.Callback or data.callback, data.Style or data.style, data.Icon or data.icon
+            end
+            data = data or {}
+            local btnData = data
             style = style or "Primary"
             local cfg = BUTTON_STYLES[style] or BUTTON_STYLES.Primary
             local darkText = (style == "Warning")
@@ -2442,7 +2451,25 @@ function BeautifulUI:CreateWindow(config)
                 Text = (icon and icon ~= "" and (icon .. "  ") or "") .. text,
                 TextColor3 = darkText and Theme.Background or Theme.Text, TextSize = 14, Parent = parent,
             })
-            Corner(9, btn)
+            -- 🔘 ФОРМА КНОПКИ: Corner(9) по умолчанию, но можно Pill / Square / Sharp / Circle
+            local shape = tostring(btnData.Shape or btnData.shape or "Round")
+            local cornerRadius = 9
+            if shape == "Pill" then cornerRadius = 18
+            elseif shape == "Square" then cornerRadius = 6
+            elseif shape == "Sharp" then cornerRadius = 0
+            elseif shape == "Circle" then cornerRadius = 18 end
+            local btnCorner = Corner(cornerRadius, btn)
+            if shape == "Circle" or shape == "Icon" then
+                btn.Size = UDim2.new(0, 40, 0, 40)
+                btn.Text = icon or "●"
+                btn.TextSize = 18
+            elseif shape == "Wide" then
+                btn.Size = UDim2.new(1, 0, 0, 44)
+            end
+            if btnData.Size or btnData.Height then
+                local hh = tonumber(btnData.Height) or tonumber(btnData.Size) or 36
+                btn.Size = UDim2.new(shape == "Circle" and 0 or 1, shape == "Circle" and hh or 0, 0, hh)
+            end
             local btnStroke = Stroke(bg, 1, (style == "Outline") and 0.4 or 0.72, btn)
             local grad
             if style == "Gradient" then grad = Gradient(Theme.Accent, Theme.AccentDark, 0, btn) end
@@ -2488,11 +2515,35 @@ function BeautifulUI:CreateWindow(config)
                 if not enabled then btnStroke.Transparency = 0.85 end
             end
             btn.SetCallback = function(fn2) callback = fn2 end
+            -- 🔘 смена формы на лету: btn:SetShape("Pill" | "Square" | "Sharp" | "Round")
+            -- работает и как btn:SetShape("Pill"), и как btn.SetShape("Pill")
+            btn.SetShape = function(a, b2)
+                local name = type(a) == "table" and b2 or a
+                local r = ({ Round = 9, Pill = 18, Square = 6, Sharp = 0 })[tostring(name)] or 9
+                shape = tostring(name)
+                btnCorner.CornerRadius = UDim.new(0, r)
+                return btn
+            end
+            -- 📐 своя высота: btn:SetHeight(48)
+            btn.SetHeight = function(a, b2)
+                local h = type(a) == "table" and b2 or a
+                local hh = tonumber(h) or 36
+                btn.Size = UDim2.new(shape == "Circle" and 0 or 1, shape == "Circle" and hh or 0, 0, hh)
+                return btn
+            end
             return btn
         end
 
         function TabAPI:Button(text, callback, style, icon)
             return TabAPI:_mkButton(page, text, callback, style, icon)
+        end
+
+        -- 🔘 Кнопка-иконка: круглая, только эмодзи/символ
+        function TabAPI:IconButton(icon, callback, opts)
+            opts = opts or {}
+            return TabAPI:_mkButton(page, opts.Text or "", callback, opts.Style or "Ghost", icon, {
+                shape = opts.Shape or "Circle", Id = opts.Id,
+            })
         end
 
         function TabAPI:ImageButton(text, imageId, callback)
@@ -3421,6 +3472,7 @@ end, Get = function() return value end}
         end
 function TabAPI:Graph(text, graphType, height, opts)
     opts = opts or {}
+    if opts.LegendPie == nil then opts.LegendPie = (opts.Legend ~= false) end
     -- === НАСТРОЙКИ И ТИПЫ ===
     local function normalizeGraphType(t)
         t = tostring(t or "line"):lower():gsub("%s+", "")
@@ -3626,6 +3678,8 @@ function TabAPI:Graph(text, graphType, height, opts)
     local needsRedraw = false
     local api
     api = {}
+    -- forward-declaration: легенда (реализация ниже, используется в redrawUnsafe)
+    local renderLegend, legendFromPie
 
     -- --- Вспомогательные функции ---
 
@@ -3893,6 +3947,13 @@ function TabAPI:Graph(text, graphType, height, opts)
                 bar.BackgroundTransparency = 0
                 bar.ZIndex = 10
              end
+        end
+
+        -- 📋 легенда: статичная (opts.Legend) или авто-доли для pie
+        if opts.Legend ~= nil and #displayData > 0 then
+            renderLegend(opts.Legend)
+        elseif opts.LegendPie and graphType == "pie" then
+            legendFromPie()
         end
 
         -- 📏 обновляем подписи осей
@@ -4175,6 +4236,108 @@ function TabAPI:Graph(text, graphType, height, opts)
         return api
     end
 
+    -- ─── 📋 ЛЕГЕНДА (для pie / radial / нескольких серий) ───
+    local legendFrame, legendRows = nil, {}
+    local legendHidden = false   -- SetLegend(nil) — до явного SetLegend(...)
+    -- куда вставлять пункты: контейнер, если он есть, иначе сам кадр легенды
+    local function legendHost()
+        if not legendFrame then return nil end
+        for _, c in ipairs(legendFrame:GetChildren()) do
+            if c.__class == "UIListLayout" then return legendFrame end
+        end
+        return legendFrame
+    end
+    local legendItems = opts.Legend
+
+    local function ensureLegend()
+        if legendFrame then return legendFrame end
+        legendFrame = Instance.new("Frame")
+        legendFrame.Name = "GraphLegend"
+        legendFrame.Size = UDim2.new(1, -24, 0, 0)
+        legendFrame.Position = UDim2.new(0, 12, 0, height + 26)
+        legendFrame.BackgroundTransparency = 1
+        legendFrame.Parent = frame
+        local layout = Create("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            Padding = UDim.new(0, 10),
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Parent = legendFrame,
+        })
+        local pad = Create("UIPadding", { PaddingTop = UDim.new(0, 2), Parent = legendFrame })
+        -- высота кадра растёт под легенду
+        frame.Size = UDim2.new(1, 0, 0, height + 70 + 22)
+        return legendFrame
+    end
+
+    -- items: {{Name="A", Value=12, Color="#ff0"}, ...} или {Name=...}
+    function renderLegend(items, autoFrom)
+        if legendHidden then return end
+        if not items and not autoFrom then return end
+        local host = ensureLegend()
+        -- чистим всё лишнее (и осиротевшие пункты от прошлых вызовов)
+        for _, c in ipairs(host:GetChildren()) do
+            if c.__class ~= "UIListLayout" and c.__class ~= "UIPadding" then c:Destroy() end
+        end
+        legendRows = {}
+        legendItems = items
+        local src = items
+        if not src and autoFrom then
+            src = {}
+            for i, v in ipairs(autoFrom) do
+                src[i] = { Name = opts.LegendLabels and opts.LegendLabels[i] or ("#" .. i), Value = v }
+            end
+        end
+        for i, item in ipairs(src or {}) do
+            -- один контейнер на пункт: чип + подпись (без дублей в иерархии)
+            local wrap = Create("Frame", {
+                Size = UDim2.new(0, 0, 1, 0),
+                BackgroundTransparency = 1,
+                AutomaticSize = Enum.AutomaticSize.X,
+                LayoutOrder = i,
+                Parent = host,
+            })
+            local chip = Create("Frame", {
+                Size = UDim2.new(0, 10, 0, 10),
+                Position = UDim2.new(0, 0, 0.5, -5),
+                BackgroundColor3 = C(item.Color or palette[((i - 1) % #palette) + 1]),
+                BorderSizePixel = 0,
+                ZIndex = 3,
+                Parent = wrap,
+            })
+            Corner(3, chip)
+            Create("TextLabel", {
+                Size = UDim2.new(0, 0, 1, 0),
+                Position = UDim2.new(0, 15, 0, 0),
+                BackgroundTransparency = 1,
+                Font = Enum.Font.Gotham,
+                Text = tostring(item.Name or "") .. (item.Value ~= nil and ("  " .. tostring(item.Value)) or ""),
+                TextColor3 = Theme.SubText,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                AutomaticSize = Enum.AutomaticSize.X,
+                Parent = wrap,
+            })
+            table.insert(legendRows, wrap)
+        end
+    end
+
+    -- автолегенда для pie: доли в процентах
+    function legendFromPie()
+        if #dataBuffer == 0 then return end
+        local total = 0
+        for _, v in ipairs(dataBuffer) do total = total + math.max(tonumber(v) or 0, 0) end
+        if total <= 0 then return end
+        local items = {}
+        for i, v in ipairs(dataBuffer) do
+            items[i] = {
+                Name = (opts.LegendLabels and opts.LegendLabels[i]) or ("#" .. i),
+                Value = string.format("%.0f%%", math.max(tonumber(v) or 0, 0) / total * 100),
+                Color = palette[((i - 1) % #palette) + 1],
+            }
+        end
+        renderLegend(items)
+    end
+
     -- 🏷 подпись поверх графика (например «FPS: 60»)
     api.SetLabel = function(txt)
         titleLbl.Text = tostring(txt or text)
@@ -4199,6 +4362,31 @@ function TabAPI:Graph(text, graphType, height, opts)
         requestRedraw()
         return api
     end
+
+    -- 📋 SetLegend: {{Name="Сервер", Value="12%", Color="#ff0"}, ...}  (nil — скрыть)
+    api.SetLegend = function(first, second)
+        -- поддержка и точки (g:SetLegend(items)), и вызова через точку
+        local arg
+        if first == api then arg = second else arg = first end
+        local items = (type(arg) == "table") and arg or nil
+        if items == nil then
+            for _, row in ipairs(legendRows) do row:Destroy() end
+            legendRows = {}
+            legendItems = nil
+            legendHidden = true
+            if legendFrame then legendFrame.Visible = false end
+            return api
+        end
+        legendHidden = false
+        if legendFrame then legendFrame.Visible = true end
+        renderLegend(items)
+        return api
+    end
+
+    api.GetLegend = function() return legendItems end
+
+    -- вернуть сам кадр легенды (для тонкой настройки)
+    api.GetLegendFrame = function() return legendFrame end
 
     api.GetData = function()
         local copy = {}

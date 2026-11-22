@@ -12,7 +12,7 @@
 
   /* ─────────────── типы элементов ─────────────── */
   const ELEMENT_TYPES = {
-    button:      { icon: "🔘", label: "Кнопка",       fields: ["text", "style", "icon"] },
+    button:      { icon: "🔘", label: "Кнопка",       fields: ["text", "style", "shape", "icon"] },
     toggle:      { icon: "🎚", label: "Тумблер",      fields: ["text", "default", "flag"] },
     slider:      { icon: "📏", label: "Слайдер",      fields: ["text", "min", "max", "default", "step", "suffix", "flag"] },
     dropdown:    { icon: "📋", label: "Дропдаун",     fields: ["text", "options", "multi", "flag"] },
@@ -25,13 +25,14 @@
     colorpicker: { icon: "🎨", label: "Выбор цвета",  fields: ["text", "color", "flag"] },
     keybind:     { icon: "⌨", label: "Кейбинд",       fields: ["text", "key", "flag"] },
     progress:    { icon: "📊", label: "Прогресс",     fields: ["text", "max", "value"] },
-    graph:       { icon: "📈", label: "График",       fields: ["text", "graphType", "height", "graphData", "graphMax", "graphAxis"] },
+    graph:       { icon: "📈", label: "График",       fields: ["text", "graphType", "height", "graphData", "graphMax", "graphAxis", "graphLegend"] },
     subtab:      { icon: "📦", label: "Подраздел",    fields: ["text", "icon"] },
   };
 
   const BUTTON_STYLES = ["Primary", "Success", "Danger", "Warning", "Gradient", "Ghost", "Outline"];
   const STATUS_KINDS = ["Success", "Danger", "Warning", "Info", "Accent"];
   const GRAPH_TYPES = ["line", "area", "bar", "scatter", "pie", "radial", "stacked"];
+  const BUTTON_SHAPES = ["Round", "Pill", "Square", "Sharp", "Circle", "Wide"];
 
   /* ─────────────── состояние ─────────────── */
   const uid = () => Math.random().toString(36).slice(2, 9);
@@ -330,7 +331,7 @@
   function defaultElement(type) {
     const base = { id: uid(), type };
     switch (type) {
-      case "button": return { ...base, text: "Кнопка", style: "Primary", icon: "" };
+      case "button": return { ...base, text: "Кнопка", style: "Primary", shape: "Round", icon: "" };
       case "toggle": return { ...base, text: "Тумблер", default: false, flag: "" };
       case "slider": return { ...base, text: "Слайдер", min: 0, max: 100, default: 50, step: 1, suffix: "", flag: "" };
       case "dropdown": return { ...base, text: "Список", options: "Опция 1, Опция 2, Опция 3", multi: false, flag: "" };
@@ -343,7 +344,7 @@
       case "colorpicker": return { ...base, text: "Цвет", color: "#FF5050", flag: "" };
       case "keybind": return { ...base, text: "Клавиша", key: "F", flag: "" };
       case "progress": return { ...base, text: "Прогресс", max: 100, value: 35 };
-      case "graph": return { ...base, text: "FPS", graphType: "line", height: 160, graphData: "", graphMax: 35, graphAxis: true };
+      case "graph": return { ...base, text: "FPS", graphType: "line", height: 160, graphData: "", graphMax: 35, graphAxis: true, graphLegend: "" };
       case "subtab": return { ...base, text: "Подраздел", icon: "📦" };
       default: return { ...base, text: type };
     }
@@ -418,6 +419,7 @@
       else if (field === "default" && item.type === "toggle") input = makeSelect(["false", "true"], item.default ? "true" : "false");
       else if (field === "multi") input = makeSelect(["false", "true"], item.multi ? "true" : "false");
       else if (field === "graphAxis") input = makeSelect(["true", "false"], item.graphAxis === false ? "false" : "true");
+      else if (field === "shape") input = makeSelect(["", ...BUTTON_SHAPES], item.shape || "");
       else if (field === "color") {
         input = document.createElement("input");
         input.type = "color";
@@ -455,6 +457,7 @@
       for (const [field, input] of Object.entries(inputs)) {
         if (field === "default" && item.type === "toggle") item.default = input.value === "true";
         else if (field === "graphAxis") item.graphAxis = input.value === "true";
+        else if (field === "shape") item.shape = input.value;
         else if (field === "multi") item.multi = input.value === "true";
         else if (["min", "max", "default", "step", "height", "value"].includes(field)) item[field] = Number(input.value) || 0;
         else item[field] = input.value;
@@ -476,6 +479,7 @@
     placeholder: "Плейсхолдер", value: "Значение", kind: "Тип", color: "Цвет",
     key: "Клавиша", graphType: "Тип графика", height: "Высота",
     graphData: "Стартовые данные (через запятую)", graphMax: "Макс. точек", graphAxis: "Оси и подписи",
+    shape: "Форма кнопки", graphLegend: "Легенда: Имя=Значение, …",
   };
 
   /* ═══════════════════════════════════════════════
@@ -524,6 +528,9 @@
     switch (item.type) {
       case "button": {
         const b = el("div", `el el-button style-${(item.style || "Primary").toLowerCase()}`, (item.icon ? item.icon + "  " : "") + (item.text || ""));
+        const radius = { Round: "9px", Pill: "18px", Square: "6px", Sharp: "0px", Circle: "50%", Wide: "9px" }[item.shape];
+        if (radius) b.style.borderRadius = radius;
+        if (item.shape === "Wide") b.style.minHeight = "44px";
         return b;
       }
       case "toggle": {
@@ -912,9 +919,24 @@
     const flagArg = item.flag ? `, ${luaStr(item.flag)}` : "";
     switch (item.type) {
       case "button": {
-        const style = item.style && item.style !== "Primary" ? `, ${luaStr(item.style)}` : "";
         const bv = varForElement(item, "btn");
         elementVars[item.id] = bv;
+        // с формой удобнее табличный вызов: он читаемее и не зависит от позиции аргументов
+        if (item.shape && item.shape !== "Round") {
+          const parts = [`Text = ${luaStr(item.text)}`, `Callback = function()`];
+          const lines = [`local ${bv} = ${T}:Button{ ${parts[0]},`];
+          const fields = [];
+          if (item.style && item.style !== "Primary") fields.push(`Style = ${luaStr(item.style)}`);
+          fields.push(`Shape = ${luaStr(item.shape)}`);
+          if (item.icon) fields.push(`Icon = ${luaStr(item.icon)}`);
+          lines.push(`    ${parts[1]}`);
+          lines.push(`        -- TODO: действие кнопки`);
+          lines.push(`    end,`);
+          lines.push(`    ${fields.join(", ")}`);
+          lines.push(`}`);
+          return lines;
+        }
+        const style = item.style && item.style !== "Primary" ? `, ${luaStr(item.style)}` : "";
         const icon = item.icon ? `, ${luaStr(item.icon)}` : "";
         return [`local ${bv} = ${T}:Button(${luaStr(item.text)}, function()`, `    -- TODO: действие кнопки`, `end${style}${icon})`];
       }
@@ -962,6 +984,17 @@
         if (gdata.length) gopts.push(`Data = {${gdata.join(", ")}}`);
         if (Number(item.graphMax) && Number(item.graphMax) !== 35) gopts.push(`MaxPoints = ${Number(item.graphMax)}`);
         if (item.graphAxis === false) gopts.push("ShowAxis = false");
+        const legendItems = String(item.graphLegend || "")
+          .split(",")
+          .map((chunk) => chunk.trim())
+          .filter(Boolean)
+          .map((chunk) => {
+            const [name, val] = chunk.split("=").map((x) => (x || "").trim());
+            if (!name) return null;
+            return val ? `{Name = ${luaStr(name)}, Value = ${luaStr(val)}}` : `{Name = ${luaStr(name)}}`;
+          })
+          .filter(Boolean);
+        if (legendItems.length) gopts.push(`Legend = {${legendItems.join(", ")}}`);
         const goptStr = gopts.length ? `, {${gopts.join(", ")}}` : "";
         return [`local ${v} = ${T}:Graph(${luaStr(item.text)}, ${luaStr(item.graphType || "line")}, ${Number(item.height) || 160}${goptStr})`, `-- ${v}:AddPoint(value) / ${v}:SetData({...}) / ${v}:SetPalette({...})`];
       }
