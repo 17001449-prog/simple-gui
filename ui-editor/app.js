@@ -25,13 +25,13 @@
     colorpicker: { icon: "🎨", label: "Выбор цвета",  fields: ["text", "color", "flag"] },
     keybind:     { icon: "⌨", label: "Кейбинд",       fields: ["text", "key", "flag"] },
     progress:    { icon: "📊", label: "Прогресс",     fields: ["text", "max", "value"] },
-    graph:       { icon: "📈", label: "График",       fields: ["text", "graphType", "height"] },
+    graph:       { icon: "📈", label: "График",       fields: ["text", "graphType", "height", "graphData", "graphMax", "graphAxis"] },
     subtab:      { icon: "📦", label: "Подраздел",    fields: ["text", "icon"] },
   };
 
   const BUTTON_STYLES = ["Primary", "Success", "Danger", "Warning", "Gradient", "Ghost", "Outline"];
   const STATUS_KINDS = ["Success", "Danger", "Warning", "Info", "Accent"];
-  const GRAPH_TYPES = ["line", "area", "bar"];
+  const GRAPH_TYPES = ["line", "area", "bar", "scatter", "pie", "radial", "stacked"];
 
   /* ─────────────── состояние ─────────────── */
   const uid = () => Math.random().toString(36).slice(2, 9);
@@ -343,7 +343,7 @@
       case "colorpicker": return { ...base, text: "Цвет", color: "#FF5050", flag: "" };
       case "keybind": return { ...base, text: "Клавиша", key: "F", flag: "" };
       case "progress": return { ...base, text: "Прогресс", max: 100, value: 35 };
-      case "graph": return { ...base, text: "FPS", graphType: "line", height: 160 };
+      case "graph": return { ...base, text: "FPS", graphType: "line", height: 160, graphData: "", graphMax: 35, graphAxis: true };
       case "subtab": return { ...base, text: "Подраздел", icon: "📦" };
       default: return { ...base, text: type };
     }
@@ -417,11 +417,12 @@
       else if (field === "graphType") input = makeSelect(GRAPH_TYPES, item.graphType || "line");
       else if (field === "default" && item.type === "toggle") input = makeSelect(["false", "true"], item.default ? "true" : "false");
       else if (field === "multi") input = makeSelect(["false", "true"], item.multi ? "true" : "false");
+      else if (field === "graphAxis") input = makeSelect(["true", "false"], item.graphAxis === false ? "false" : "true");
       else if (field === "color") {
         input = document.createElement("input");
         input.type = "color";
         input.value = item.color || "#FF5050";
-      } else if (["min", "max", "default", "step", "height", "value"].includes(field)) {
+      } else if (["min", "max", "default", "step", "height", "value", "graphMax"].includes(field)) {
         input = document.createElement("input");
         input.type = "number";
         input.value = item[field] ?? "";
@@ -453,6 +454,7 @@
     ok.onclick = () => {
       for (const [field, input] of Object.entries(inputs)) {
         if (field === "default" && item.type === "toggle") item.default = input.value === "true";
+        else if (field === "graphAxis") item.graphAxis = input.value === "true";
         else if (field === "multi") item.multi = input.value === "true";
         else if (["min", "max", "default", "step", "height", "value"].includes(field)) item[field] = Number(input.value) || 0;
         else item[field] = input.value;
@@ -473,6 +475,7 @@
     suffix: "Суффикс", options: "Опции (через запятую)", multi: "Мультивыбор",
     placeholder: "Плейсхолдер", value: "Значение", kind: "Тип", color: "Цвет",
     key: "Клавиша", graphType: "Тип графика", height: "Высота",
+    graphData: "Стартовые данные (через запятую)", graphMax: "Макс. точек", graphAxis: "Оси и подписи",
   };
 
   /* ═══════════════════════════════════════════════
@@ -650,6 +653,63 @@
     const step = W / (N - 1);
     const xy = pts.map((v, i) => [i * step, H - 6 - Math.min(1, Math.max(0, v)) * (H - 14)]);
 
+    if (type === "scatter") {
+      pts.forEach((v, i) => {
+        const c = document.createElementNS(svgNS, "circle");
+        c.setAttribute("cx", String(xy[i][0]));
+        c.setAttribute("cy", String(xy[i][1]));
+        c.setAttribute("r", "3");
+        c.setAttribute("fill", c1);
+        c.setAttribute("opacity", "0.85");
+        svg.appendChild(c);
+      });
+      return svg;
+    }
+
+    if (type === "pie" || type === "radial") {
+      const cx = W / 2, cy = H / 2;
+      const radius = Math.min(W, H) / 2 - 4;
+      const colors = ["#00ffdc", "#ffc832", "#ff6464", "#9664ff", "#64ff64"];
+      if (type === "pie") {
+        let acc = 0;
+        const total = pts.reduce((a, b) => a + Math.max(b, 0), 0) || 1;
+        pts.slice(0, 6).forEach((v, i) => {
+          const frac = Math.max(v, 0) / total;
+          if (frac <= 0) return;
+          const a0 = acc * Math.PI * 2 - Math.PI / 2;
+          const a1 = (acc + frac) * Math.PI * 2 - Math.PI / 2;
+          const large = frac > 0.5 ? 1 : 0;
+          const x0 = cx + Math.cos(a0) * radius, y0 = cy + Math.sin(a0) * radius;
+          const x1 = cx + Math.cos(a1) * radius, y1 = cy + Math.sin(a1) * radius;
+          const path = document.createElementNS(svgNS, "path");
+          path.setAttribute("d", `M${cx},${cy} L${x0},${y0} A${radius},${radius} 0 ${large} 1 ${x1},${y1} Z`);
+          path.setAttribute("fill", colors[i % colors.length]);
+          path.setAttribute("opacity", "0.9");
+          svg.appendChild(path);
+          acc += frac;
+        });
+        const hole = document.createElementNS(svgNS, "circle");
+        hole.setAttribute("cx", String(cx)); hole.setAttribute("cy", String(cy));
+        hole.setAttribute("r", String(radius * 0.45));
+        hole.setAttribute("fill", "var(--secondary, #21222c)");
+        svg.appendChild(hole);
+      } else {
+        const n = Math.min(pts.length, 10);
+        for (let i = 0; i < n; i++) {
+          const ang = (i / n) * Math.PI * 2 - Math.PI / 2;
+          const len = Math.max(4, Math.min(1, Math.max(0, pts[i])) * radius);
+          const line = document.createElementNS(svgNS, "line");
+          line.setAttribute("x1", String(cx)); line.setAttribute("y1", String(cy));
+          line.setAttribute("x2", String(cx + Math.cos(ang) * len));
+          line.setAttribute("y2", String(cy + Math.sin(ang) * len));
+          line.setAttribute("stroke", colors[i % colors.length]);
+          line.setAttribute("stroke-width", "2");
+          svg.appendChild(line);
+        }
+      }
+      return svg;
+    }
+
     if (type === "bar") {
       const bw = Math.max(3, step * 0.55);
       pts.forEach((v, i) => {
@@ -667,7 +727,7 @@
       return svg;
     }
 
-    if (type === "area") {
+    if (type === "area" || type === "stacked") {
       const area = document.createElementNS(svgNS, "path");
       const d = `M${xy[0][0]},${H - 4} ` + xy.map(([x, y]) => `L${x},${y}`).join(" ") + ` L${W},${H - 4} Z`;
       area.setAttribute("d", d);
@@ -897,7 +957,13 @@
       }
       case "graph": {
         const v = varForElement(item, "graph");
-        return [`local ${v} = ${T}:Graph(${luaStr(item.text)}, ${luaStr(item.graphType || "line")}, ${Number(item.height) || 160})`, `-- ${v}:AddPoint(value) в цикле обновления`];
+        const gopts = [];
+        const gdata = String(item.graphData || "").split(",").map((x) => Number(x.trim())).filter((x) => !Number.isNaN(x));
+        if (gdata.length) gopts.push(`Data = {${gdata.join(", ")}}`);
+        if (Number(item.graphMax) && Number(item.graphMax) !== 35) gopts.push(`MaxPoints = ${Number(item.graphMax)}`);
+        if (item.graphAxis === false) gopts.push("ShowAxis = false");
+        const goptStr = gopts.length ? `, {${gopts.join(", ")}}` : "";
+        return [`local ${v} = ${T}:Graph(${luaStr(item.text)}, ${luaStr(item.graphType || "line")}, ${Number(item.height) || 160}${goptStr})`, `-- ${v}:AddPoint(value) / ${v}:SetData({...}) / ${v}:SetPalette({...})`];
       }
       case "subtab": {
         const sub = varForElement(item, "sub");
