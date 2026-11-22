@@ -2378,6 +2378,17 @@ function BeautifulUI:CreateWindow(config)
         local TabAPI = {Window = Window, Page = page, Name = tabName}
 
         -- 🔔 Бейдж на вкладке (например, количество новых обновлений)
+        -- 💬 уведомления прямо от вкладки: Main:Toast("готово", "Success")
+        -- (удобно, когда лень писать BeautifulUI:Notify — и не нужно тащить переменную окна)
+        function TabAPI:Toast(text, notifType, duration)
+            return BeautifulUI:Toast(text, notifType, duration)
+        end
+
+        function TabAPI:Notify(title, text, duration, notifType, buttons)
+            -- Main:Notify("Заголовок", "текст") — а можно и красивее:
+            return BeautifulUI:Notify(title, text, duration, notifType, buttons)
+        end
+
         function TabAPI:Badge(count)
             local badge = tabButton:FindFirstChild("Badge")
             if not count or count <= 0 then
