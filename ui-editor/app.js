@@ -50,7 +50,7 @@
         discord: false,
         discordInvite: "",
         compact: false,
-        libUrl: "",
+        libUrl: "https://raw.githubusercontent.com/17001449-prog/simple-gui/refs/heads/arena/acdd1950-simple-gui/SimpleUI.txt",
         font: "",
         fontScale: 100,
         fontPicker: false,
@@ -61,6 +61,9 @@
       ],
       activeTabId: null,
       activeElementId: null,
+      scenarios: [],
+      activeScenarioId: null,
+      view: "ui",
       device: "desktop",
       appTheme: "dark",
       showGrid: false,
@@ -746,6 +749,7 @@
      ═══════════════════════════════════════════════ */
   function generateLua() {
     const w = state.window;
+    elementVars = {};
     const lines = [];
     const push = (s = "") => lines.push(s);
 
@@ -792,6 +796,21 @@
       push("");
     }
 
+    // ── сценарии из визуального редактора ──
+    state.__elementVars = elementVars;
+    if (window.Scenarios && typeof window.Scenarios.generateLua === "function") {
+      try {
+        const scen = window.Scenarios.generateLua();
+        if (scen) {
+          push("");
+          push(scen);
+        }
+      } catch (err) {
+        push("-- [!] ошибка генерации сценариев: " + err.message);
+      }
+    }
+
+    push("");
     push("-- Готово! Окно создано, элементы подключены.");
     return lines.join("\n");
   }
@@ -825,32 +844,46 @@
     };
   })();
 
+  /* id элемента → имя Lua-переменной, чтобы сценарии могли на него ссылаться */
+  let elementVars = {};
+
   function elementLua(item, tab) {
     const T = varForTab(tab);
     const flagArg = item.flag ? `, ${luaStr(item.flag)}` : "";
     switch (item.type) {
       case "button": {
         const style = item.style && item.style !== "Primary" ? `, ${luaStr(item.style)}` : "";
+        const bv = varForElement(item, "btn");
+        elementVars[item.id] = bv;
         const icon = item.icon ? `, ${luaStr(item.icon)}` : "";
-        return [`${T}:Button(${luaStr(item.text)}, function()`, `    -- TODO: действие кнопки`, `end${style}${icon})`];
+        return [`local ${bv} = ${T}:Button(${luaStr(item.text)}, function()`, `    -- TODO: действие кнопки`, `end${style}${icon})`];
       }
-      case "toggle":
-        return [`${T}:Toggle(${luaStr(item.text)}, ${item.default ? "true" : "false"}, function(value)`, `    print(${luaStr(item.text)}, value)`, `end${flagArg})`];
+      case "toggle": {
+        const v = varForElement(item, "toggle");
+        elementVars[item.id] = v;
+        return [`local ${v} = ${T}:Toggle(${luaStr(item.text)}, ${item.default ? "true" : "false"}, function(value)`, `    print(${luaStr(item.text)}, value)`, `end${flagArg})`];
+      }
       case "slider": {
         const opts = [];
         if (Number(item.step) && Number(item.step) !== 1) opts.push(`step = ${Number(item.step)}`);
         if (item.suffix) opts.push(`suffix = ${luaStr(" " + String(item.suffix).trim())}`);
         const optStr = opts.length ? `, {${opts.join(", ")}}` : "";
-        return [`${T}:Slider(${luaStr(item.text)}, ${Number(item.min) || 0}, ${Number(item.max) || 100}, ${Number(item.default) || 0}, function(value)`, `    print(${luaStr(item.text)}, value)`, `end${flagArg}${optStr})`];
+        const v = varForElement(item, "slider");
+        elementVars[item.id] = v;
+        return [`local ${v} = ${T}:Slider(${luaStr(item.text)}, ${Number(item.min) || 0}, ${Number(item.max) || 100}, ${Number(item.default) || 0}, function(value)`, `    print(${luaStr(item.text)}, value)`, `end${flagArg}${optStr})`];
       }
       case "dropdown": {
         const opts = String(item.options || "").split(",").map((s) => s.trim()).filter(Boolean);
         const list = "{" + opts.map(luaStr).join(", ") + "}";
         const multi = item.multi ? `, {multi = true}` : "";
-        return [`${T}:Dropdown(${luaStr(item.text)}, ${list}, function(value)`, `    print(${luaStr(item.text)}, value)`, `end${flagArg}${multi})`];
+        const v = varForElement(item, "dropdown");
+        elementVars[item.id] = v;
+        return [`local ${v} = ${T}:Dropdown(${luaStr(item.text)}, ${list}, function(value)`, `    print(${luaStr(item.text)}, value)`, `end${flagArg}${multi})`];
       }
       case "input":
-        return [`${T}:Input(${luaStr(item.text)}, ${luaStr(item.placeholder || "Введите…")}, function(value)`, `    print(${luaStr(item.text)}, value)`, `end${flagArg})`];
+        const v = varForElement(item, "input");
+        elementVars[item.id] = v;
+        return [`local ${v} = ${T}:Input(${luaStr(item.text)}, ${luaStr(item.placeholder || "Введите…")}, function(value)`, `    print(${luaStr(item.text)}, value)`, `end${flagArg})`];
       case "label": return [`${T}:Label(${luaStr(item.text)})`];
       case "paragraph": return [`${T}:Paragraph(${luaStr(item.text)})`];
       case "status": return [`local ${varForElement(item, "status")} = ${T}:Status(${luaStr(item.text)}, ${luaStr(item.value)}, ${luaStr(item.kind)})`];
@@ -891,6 +924,8 @@
       return m;
     });
   }
+
+  window.__highlightLua = highlightLua;
 
   function renderCode() {
     const code = generateLua();
@@ -1262,6 +1297,89 @@
   /* ═══════════════════════════════════════════════
      СБОРКА
      ═══════════════════════════════════════════════ */
+  /* ═══════════ РЕЖИМЫ ═══════════ */
+  function applyView() {
+    const scen = state.view === "scen";
+    const uiView = $("#ui-view");
+    const scenView = $("#scen-view");
+    if (!uiView || !scenView) return;
+    uiView.hidden = scen;
+    scenView.hidden = !scen;
+    document.querySelectorAll("[data-view]").forEach((b) => {
+      b.classList.toggle("active", b.dataset.view === state.view);
+    });
+    if (scen) renderScenarios();
+    else renderCode();
+  }
+
+  function renderScenarios() {
+    if (!window.Scenarios) return;
+    const host = $("#scen-host");
+    if (!host) return;
+    window.Scenarios.render(host);
+    renderScenariosSidebar();
+    renderScenarioCode();
+  }
+
+  function renderScenariosSidebar() {
+    const list = $("#scen-list");
+    const sum = $("#scen-summary");
+    if (!list) return;
+    list.innerHTML = "";
+    const scenarios = state.scenarios || [];
+    for (const sc of scenarios) {
+      const row = el("div", "tab-row" + (sc.id === state.activeScenarioId ? " active" : ""));
+      const on = sc.enabled !== false;
+      row.append(el("span", "ico", on ? "▶" : "⏸"), el("span", "nm", sc.name));
+      const acts = el("div", "row-actions");
+      const go = el("button", null, "✎");
+      go.title = "Открыть";
+      go.onclick = (e) => {
+        e.stopPropagation();
+        state.activeScenarioId = sc.id;
+        renderScenarios();
+        save();
+      };
+      const del = el("button", null, "✕");
+      del.title = "Удалить";
+      del.onclick = (e) => {
+        e.stopPropagation();
+        if (scenarios.length === 1) return toast("Нужен хотя бы один сценарий");
+        state.scenarios = scenarios.filter((x) => x.id !== sc.id);
+        if (state.activeScenarioId === sc.id) state.activeScenarioId = state.scenarios[0].id;
+        renderScenarios();
+        save();
+      };
+      acts.append(go, del);
+      row.append(acts);
+      row.onclick = () => { state.activeScenarioId = sc.id; renderScenarios(); save(); };
+      list.appendChild(row);
+    }
+    if (sum && window.Scenarios) {
+      const info = window.Scenarios.summary();
+      sum.textContent = `${info.scenarios} сценар. · ${info.nodes} блоков · ${info.links} связей`;
+    }
+  }
+
+  function renderScenarioCode() {
+    const out = $("#scen-code");
+    const stats = $("#scen-stats");
+    if (!out || !window.Scenarios) return;
+    let code = "";
+    try {
+      code = window.Scenarios.generateLua() || "-- пока нет блоков: добавьте событие и действие";
+    } catch (err) {
+      code = "-- ошибка: " + err.message;
+    }
+    /* подсветка уже реализована для общего кода — переиспользуем */
+    out.innerHTML = window.__highlightLua ? window.__highlightLua(code) : code;
+    if (stats) stats.textContent = `${code.split("\n").length} строк`;
+  }
+
+  window.__renderScenarios = renderScenarios;
+  window.__renderScenarioCode = renderScenarioCode;
+  window.__renderScenarioSidebar = renderScenariosSidebar;
+
   function renderAll() {
     renderThemeSelect();
     $("#win-title").value = state.window.title;
@@ -1299,8 +1417,30 @@
 
   function init() {
     load();
+    if (window.Scenarios && window.Scenarios.api) {
+      window.Scenarios.api({
+        getState: () => state,
+        save,
+        toast,
+        luaStr,
+        varForTab,
+        el,
+      });
+    }
     bindPanel();
     bindPreviewSearch();
+    document.querySelectorAll("[data-view]").forEach((b) => {
+      b.onclick = () => { state.view = b.dataset.view; applyView(); save(); };
+    });
+    const scenCopy = $("#scen-copy");
+    if (scenCopy) {
+      scenCopy.onclick = async () => {
+        const code = window.Scenarios ? window.Scenarios.generateLua() || "" : "";
+        const ok = await copyText(code || "# нет сценариев");
+        toast(ok ? "Код сценариев скопирован ✅" : "Скопируйте вручную");
+      };
+    }
+    applyView();
     renderFontPresets();
     renderAll();
     if (!store.get(LS_KEY)) {

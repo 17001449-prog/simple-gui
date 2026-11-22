@@ -18,6 +18,10 @@
   </div>
 
   <div class="topbar-actions">
+    <div class="seg" role="group" aria-label="Режим редактора">
+      <button class="seg-btn active" data-view="ui">🖥 Окно</button>
+      <button class="seg-btn" data-view="scen">🎬 Сценарии</button>
+    </div>
     <div class="seg" role="group" aria-label="Тема оформления">
       <button class="seg-btn" data-app-theme="dark">🌙</button>
       <button class="seg-btn" data-app-theme="light">☀️</button>
@@ -28,7 +32,7 @@
   </div>
 </header>
 
-<main class="layout">
+<main class="layout" id="ui-view">
   <!-- ═══ ЛЕВАЯ КОЛОНКА: настройки ═══ -->
   <aside class="panel settings">
     <section class="card">
@@ -185,6 +189,53 @@
   </aside>
 </main>
 
+<!-- ═══ РЕЖИМ: СЦЕНАРИИ ═══ -->
+<main class="layout scen-layout" id="scen-view" hidden>
+  <aside class="panel settings" id="scen-side">
+    <section class="card">
+      <h2>Как это работает</h2>
+      <p class="hint" style="margin:0 0 8px">
+        <b>Событие</b> → <b>Действие</b> → <b>Условие</b> → <b>Свой код</b>.
+        Тяните линию от правой точки блока к левой точке другого блока.
+      </p>
+      <ul class="sc-help">
+        <li><b>⚡ Событие</b> — что случилось (кнопка нажата, тумблер включён)</li>
+        <li><b>🎬 Действие</b> — что сделать (уведомление, включить что-то)</li>
+        <li><b>❓ Условие</b> — ветвление по Lua-выражению</li>
+        <li><b>⏱ Пауза</b> — <code>task.wait</code></li>
+        <li><b>𝒇 Код</b> — произвольный Lua</li>
+      </ul>
+      <p class="hint" style="margin:8px 0 0">
+        Удалить связь — клик по точке на линии. Удалить блок — ✕ в его шапке.
+      </p>
+    </section>
+    <section class="card">
+      <h2>Сценарии</h2>
+      <div id="scen-list" class="tabs-list"></div>
+      <p class="hint" id="scen-summary">—</p>
+    </section>
+  </aside>
+
+  <section class="panel scen-main">
+    <div class="sc-host" id="scen-host"></div>
+  </section>
+
+  <aside class="panel code">
+    <div class="code-head">
+      <h2>Сценарии в Lua</h2>
+      <div class="code-actions">
+        <button class="icon-btn" id="scen-copy" title="Скопировать весь код">⧉</button>
+      </div>
+    </div>
+    <pre class="code-block"><code id="scen-code"></code></pre>
+    <div class="code-foot">
+      <span id="scen-stats">—</span>
+      <span class="dot">·</span>
+      <span>вставляется в общий код автоматически</span>
+    </div>
+  </aside>
+</main>
+
 <div class="modal" id="modal" hidden>
   <div class="modal-box">
     <div class="modal-head">
@@ -204,5 +255,6 @@
 
 <script src="themes.js"></script>
 <script src="app.js"></script>
+<script src="scenarios.js"></script>
 </body>
 </html>

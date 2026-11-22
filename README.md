@@ -258,6 +258,7 @@ python3 -m http.server 8080       # если нет Node
 | **Импорт Lua** | вставь сгенерированный код обратно — окно, вкладки и элементы восстановятся (roundtrip) |
 | **Discord / конфиг** | чекбоксы `ShowConfig`, `Backdrop`, `Compact`, инвайт → `SetDiscord` |
 | **Автосохранение** | состояние живёт в `localStorage`, закрыл вкладку — вернулся к тому же проекту |
+| **🎬 Сценарии** | визуальный конструктор логики: блоки «Событие → Действие → Условие → Код», связи линиями, свой Lua в каждом блоке; результат вставляется в общий код |
 
 Генератор выдаёт ровно тот API, что есть в библиотеке (`Window:Tab`, `Tab:Button(text, cb, style, icon)`,
 `Tab:Slider(text, min, max, default, cb, flag, {step, suffix})`, `Tab:Dropdown(text, options, cb, flag, {multi})`
